@@ -130,8 +130,9 @@ function BorderedMatrix(K::AbstractMatrix{T}, p::Integer) where {T}
     0 < p < N || throw(ArgumentError("need 0 < p < size(K, 1)"))
     n = N - p
     A = K[1:n, 1:n]
-    B = Matrix{T}(K[1:n, n+1:N])
-    C = Matrix{T}(transpose(K[n+1:N, 1:n]))
+    # borders stay sparse if K is sparse (in a block-banded K they are mostly zero)
+    B = K isa AbstractSparseMatrix ? K[1:n, n+1:N] : Matrix{T}(K[1:n, n+1:N])
+    C = K isa AbstractSparseMatrix ? sparse(transpose(K[n+1:N, 1:n])) : Matrix{T}(transpose(K[n+1:N, 1:n]))
     D = Matrix{T}(K[n+1:N, n+1:N])
     return BorderedMatrix(A, B, C, D)
 end
@@ -296,7 +297,7 @@ Each solve then costs a single solve with `A`.
 """
 struct BorderedMatrixLU{T<:Number, F, M<:AbstractMatrix{T}} <: Factorization{T}
     A::F            # factorisation of the top left block
-    B::M            # right border, n × p
+    B::M            # right border, n × p (dense, or sparse if given sparse)
     C::M            # bottom border (transposed), n × p
     D::Matrix{T}    # corner, p × p
     W::Matrix{T}    # A⁻ᵀ C
@@ -312,16 +313,17 @@ Base.size(F::BorderedMatrixLU) = (size(F.B, 1) + nborder(F), size(F.B, 1) + nbor
 
 function _factor(Af, M::BorderedMatrix{T}, alg::Symbol) where {T}
     alg in (:BEM, :BED) || throw(ArgumentError("alg must be :BEM or :BED"))
-    B, C, D = Matrix{T}(_asmat(M._12)), Matrix{T}(_asmat(M._21)), Matrix{T}(_asmat(M._22))
-    W  = _tsolve!(Af, copy(C))
+    B, C, D = _asmat(M._12), _asmat(M._21), Matrix{T}(_asmat(M._22))
+    B isa AbstractSparseMatrix || (B = Matrix{T}(B); C = Matrix{T}(C))
+    W  = _tsolve!(Af, Matrix{T}(C))
     Sw = lu(D - transpose(W) * B)
     if alg === :BEM
-        V  = _solve!(Af, copy(B))
+        V  = _solve!(Af, Matrix{T}(B))
         Sv = lu(D - transpose(C) * V)
     else
         V, Sv = zeros(T, 0, 0), Sw
     end
-    return BorderedMatrixLU{T, typeof(Af), Matrix{T}}(Af, B, C, D, W, V, Sw, Sv, alg, M._22 isa Number)
+    return BorderedMatrixLU{T, typeof(Af), typeof(B)}(Af, B, C, D, W, V, Sw, Sv, alg, M._22 isa Number)
 end
 
 """
