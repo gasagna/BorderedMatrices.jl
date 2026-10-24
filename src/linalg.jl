@@ -44,25 +44,26 @@ Base.:\(F::BorderedMatrixLU, r::BorderedVector) = ldiv!(F, copy(r))
 #   y = (D - WᵀB)⁻¹ (g - Wᵀ f)
 #   x = A⁻¹ (f - B y)
 
-struct BEDFactorization{T, F} <: BorderedMatrixLU{T}
+struct BEDFactorization{T, F, N<:AbstractMatrix{T}} <: BorderedMatrixLU{T}
     A::F                            # factorisation of A
-    B::Matrix{T}
+    B::N
     W::Matrix{T}                    # A⁻ᵀ C
     S::LU{T, Matrix{T}, Vector{Int}}  # D - Wᵀ B
 end
 
 function BEDFactorization(Af, M::BorderedMatrix{T}) where {T}
-    W = ldiv!(transpose(Af), copy(M.C))
+    W = ldiv!(transpose(Af), Matrix(M.C))
     S = lu(M.D - transpose(W) * M.B)
-    return BEDFactorization{T, typeof(Af)}(Af, M.B, W, S)
+    return BEDFactorization{T, typeof(Af), typeof(M.B)}(Af, M.B, W, S)
 end
 
+# no allocations: g is overwritten with y, then f with x
 function LinearAlgebra.ldiv!(F::BEDFactorization{T}, r::BorderedVector{T}) where {T}
     f, g = r.x, r.y
-    y = F.S \ (g - transpose(F.W) * f)
-    mul!(f, F.B, y, -1, 1)          # f - B y
-    ldiv!(F.A, f)                   # x
-    g .= y
+    mul!(g, transpose(F.W), f, -one(T), one(T))   # g - Wᵀ f
+    ldiv!(F.S, g)                                 # y
+    mul!(f, F.B, g, -one(T), one(T))              # f - B y
+    ldiv!(F.A, f)                                 # x
     return r
 end
 
@@ -76,33 +77,40 @@ end
 #   y₂ = (D - CᵀV)⁻¹ (g₁ - Cᵀ ξ)         correction, with the other Schur complement
 #   x  = ξ - V y₂,  y = y₁ + y₂
 
-struct BEMFactorization{T, F} <: BorderedMatrixLU{T}
+struct BEMFactorization{T, F, N<:AbstractMatrix{T}} <: BorderedMatrixLU{T}
     A::F                            # factorisation of A
-    B::Matrix{T}
-    C::Matrix{T}
+    B::N
+    C::N
     D::Matrix{T}
     W::Matrix{T}                    # A⁻ᵀ C
     V::Matrix{T}                    # A⁻¹ B
     Sw::LU{T, Matrix{T}, Vector{Int}} # D - Wᵀ B
     Sv::LU{T, Matrix{T}, Vector{Int}} # D - Cᵀ V
+    y₁::Vector{T}                   # workspace, length p
 end
 
 function BEMFactorization(Af, M::BorderedMatrix{T}) where {T}
-    W  = ldiv!(transpose(Af), copy(M.C))
-    V  = ldiv!(Af, copy(M.B))
+    W  = ldiv!(transpose(Af), Matrix(M.C))      # W and V are dense even if B and C are sparse
+    V  = ldiv!(Af, Matrix(M.B))
     Sw = lu(M.D - transpose(W) * M.B)
     Sv = lu(M.D - transpose(M.C) * V)
-    return BEMFactorization{T, typeof(Af)}(Af, M.B, M.C, M.D, W, V, Sw, Sv)
+    return BEMFactorization{T, typeof(Af), typeof(M.B)}(Af, M.B, M.C, M.D, W, V, Sw, Sv, zeros(T, size(M.D, 1)))
 end
 
+# no allocations: y₁ is kept in the workspace F.y₁; f is overwritten with f₁, ξ and
+# then x; g with g₁, y₂ and then y. The workspace makes a factorisation unsafe to use
+# from several threads at once.
 function LinearAlgebra.ldiv!(F::BEMFactorization{T}, r::BorderedVector{T}) where {T}
-    f, g = r.x, r.y
-    y₁ = F.Sw \ (g - transpose(F.W) * f)
-    mul!(f, F.B, y₁, -1, 1)         # f₁
-    g₁ = g - F.D * y₁
-    ldiv!(F.A, f)                   # ξ
-    y₂ = F.Sv \ (g₁ - transpose(F.C) * f)
-    mul!(f, F.V, y₂, -1, 1)         # x
-    g .= y₁ .+ y₂
+    f, g, y₁ = r.x, r.y, F.y₁
+    copyto!(y₁, g)
+    mul!(y₁, transpose(F.W), f, -one(T), one(T))  # g - Wᵀ f
+    ldiv!(F.Sw, y₁)                               # y₁
+    mul!(f, F.B, y₁, -one(T), one(T))             # f₁ = f - B y₁
+    mul!(g, F.D, y₁, -one(T), one(T))             # g₁ = g - D y₁
+    ldiv!(F.A, f)                                 # ξ = A⁻¹ f₁
+    mul!(g, transpose(F.C), f, -one(T), one(T))   # g₁ - Cᵀ ξ
+    ldiv!(F.Sv, g)                                # y₂
+    mul!(f, F.V, g, -one(T), one(T))              # x = ξ - V y₂
+    g .+= y₁                                      # y = y₁ + y₂
     return r
 end

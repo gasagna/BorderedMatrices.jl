@@ -26,7 +26,8 @@ a matrix and every part of a vector is a vector, all with the same element
 type. $A$ can be any matrix whose factorisation supports `ldiv!` with the
 matrix and with its transpose (a dense `Matrix`, a `SparseMatrixCSC`, a
 `BandedMatrix` from [BandedMatrices.jl](https://github.com/JuliaLinearAlgebra/BandedMatrices.jl), ...);
-$B$, $C$ and $D$ are dense `Matrix`es.
+$B$ and $C$ are matrices of the same type, dense or sparse; $D$ is a dense
+`Matrix`.
 
 Systems of this form appear wherever a large structured operator is augmented
 by a few dense rows and columns: Newton methods for periodic orbits (the period
@@ -108,6 +109,17 @@ ldiv!(F, r)                                # or in place
 * `lu(M; alg = :BEM, factorize = lu)`: `factorize` is applied to $A$; use
   `factorize = lu!` to factorise a dense $A$ in place.
 * `alg = :BED` selects the plain block elimination.
+* `ldiv!(F, r)` does not allocate (apart from what the factorisation of $A$
+  allocates in its own `ldiv!`, as UMFPACK does). BEM keeps a work vector of
+  length $p$ in the factorisation, so a factorisation should not be used by
+  several threads at once.
+
+### Sparse borders
+
+When the border columns are mostly zero, pass $B$ and $C$ as sparse matrices:
+they are then stored and multiplied as such. The package itself does not depend
+on SparseArrays; any matrix type that supports `mul!` and `Matrix(C)` works.
+$W = A^{-\top}C$ and $V = A^{-1}B$ are dense in any case.
 
 ## Real and complex matrices
 
@@ -209,14 +221,14 @@ k_l,\ k_u \;\le\; (h + 1)\,r - 1 ,
 and BEM takes care of the border. In code, with $n = N - p$:
 
 ```julia
-using BandedMatrices
-r, Ns, h, q = 24, 583, 4, 1                # 24 unknowns per slice, 583 slices, 8th-order FD, 1 extra unknown
-p = h*r + q; n = r*Ns + q - p
-# K: the N × N matrix, ordered slice by slice, extra unknowns last
+using BandedMatrices, SparseArrays
+# K: the N × N sparse matrix, ordered slice by slice, extra unknowns last
+p = h*r + q
+n = size(K, 1) - p
 M = BorderedMatrix(BandedMatrix(K[1:n, 1:n]),          # A, banded
-                   Matrix(K[1:n, n+1:end]),            # B
-                   Matrix(transpose(K[n+1:end, 1:n])), # C
-                   Matrix(K[n+1:end, n+1:end]))        # D
+                   K[1:n, n+1:end],                     # B, sparse
+                   sparse(transpose(K[n+1:end, 1:n])),  # C, sparse
+                   Matrix(K[n+1:end, n+1:end]))         # D
 F = lu(M)
 z = F \ BorderedVector(f, g)
 ```
@@ -229,79 +241,66 @@ Better still, assemble the blocks directly in this form, with $A$ as a
 | part | numbers stored |
 |---|---|
 | banded LU of $A$ | $(2k_l + k_u + 1)\,n \approx 3(h+1)\,r\,n$ |
-| $W = A^{-\top}C$ and $V = A^{-1}B$ (BEM) | $2\,p\,n$ |
-| $B$, $C$, $D$ (part of the matrix) | $2\,p\,n + p^2$ |
+| $W = A^{-\top}C$ and $V = A^{-1}B$ (BEM; only $W$ for BED) | $2\,p\,n$ |
+| $B$, $C$ (sparse) and $D$ | the nonzeros of $B$ and $C$: $O(h^2 r^2)$ in the blocks next to the border, plus $2qn$ in the $q$ dense rows and columns; $p^2$ for $D$ |
 
 Everything grows linearly with $N_s$, and there is no fill outside the band.
+The figure shows the structure for a small example: $K$, the nonzeros of
+UMFPACK's factors $L + U$, and what the bordered factorisation stores.
+
+![Sparsity of K, of UMFPACK's factors, and storage of the bordered factorisation](benchmark/sparsity.svg)
 
 ## Benchmark
 
-Cyclic block-banded matrices as above, with $N_s$ slices of $r$ unknowns, a
-stencil reaching $h$ slices on each side, and one dense border row and column
-($q = 1$). Random blocks, made diagonally dominant. Three solvers:
+Cyclic block-banded matrices as above, with $N_s = 20, \dots, 200$ slices of
+$r = 5, 10, 50, 100$ unknowns, a stencil reaching $h = 1$ or $h = 4$ slices on
+each side, and one dense border row and column ($q = 1$). Random blocks, made
+diagonally dominant. Three solvers:
 
 * **UMFPACK**: sparse LU of the whole $(rN_s + 1)\times(rN_s + 1)$ matrix, `lu(K)`;
-* **BEM**: `lu(M)` with $A$ a `BandedMatrix` and the last $h$ slices and the
-  extra unknown as the border;
+* **BEM**: `lu(M)` with $A$ a `BandedMatrix`, sparse $B$ and $C$, and the last
+  $h$ slices and the extra unknown as the border;
 * **BED**: the same with `alg = :BED`, which does not compute $V = A^{-1}B$.
 
-Times are the best of a few runs, on one core (`BLAS.set_num_threads(1)`) of an
-Intel Xeon at 2.8 GHz, Julia 1.11, BandedMatrices.jl 1.14. "Factor" includes
-building the blocks from the sparse $K$ (including the conversion of $A$ to a
-`BandedMatrix`) and, for BEM/BED, computing $W$ (and $V$) and the Schur
-complements; "solve" is one right-hand side. Memory is that of the
-factorisation: for UMFPACK $16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes
-(values and indices); for BEM/BED the banded LU of $A$ and $W$ (and $V$).
-The residual is $\lVert Kx - b\rVert / \lVert b\rVert$. Reproduce with
-`julia --project=benchmark benchmark/cyclic.jl h`.
+Memory is that of the factorisation: for UMFPACK
+$16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes (values and indices), for
+BEM/BED the banded LU of $A$, $W$ (and $V$). Times are the best of several
+runs on one core (`BLAS.set_num_threads(1)`) of an Intel Xeon at 2.8 GHz, with
+Julia 1.11 and BandedMatrices.jl 1.14; the factorisation time includes building
+the blocks from $K$, the conversion of $A$ to a `BandedMatrix`, and computing
+$W$ (and $V$) and the Schur complements. All three solvers give the same
+residual, $\lVert Kx - b\rVert/\lVert b\rVert \approx 10^{-15}$.
 
-**$h = 1$** (e.g. second-order centred differences, or a one-step scheme between consecutive slices):
+![Memory of the factorisation against the number of unknowns](benchmark/memory.svg)
 
-| r | N_s | unknowns | factor (s): UMFPACK / BEM / BED | solve (ms): UMFPACK / BEM / BED | memory (MB): UMFPACK / BEM / BED | residual: UMFPACK / BEM / BED |
-|---:|---:|---:|:---:|:---:|:---:|:---:|
-| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.00 / 0.01 / 0.00 | 0.0 / 0.0 / 0.0 | 1e-15 / 2e-15 / 2e-15 |
-| 5 | 50 | 251 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.1 / 0.1 / 0.1 | 3e-16 / 3e-16 / 3e-16 |
-| 5 | 100 | 501 | 0.001 / 0.000 / 0.000 | 0.02 / 0.03 / 0.02 | 0.2 / 0.2 / 0.1 | 4e-15 / 5e-15 / 4e-15 |
-| 10 | 20 | 201 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.2 / 0.1 / 0.1 | 6e-16 / 6e-16 / 6e-16 |
-| 10 | 50 | 501 | 0.002 / 0.001 / 0.001 | 0.04 / 0.03 / 0.06 | 0.4 / 0.3 / 0.3 | 6e-16 / 6e-16 / 9e-16 |
-| 10 | 100 | 1001 | 0.004 / 0.002 / 0.001 | 0.07 / 0.06 / 0.05 | 0.8 / 0.6 / 0.6 | 4e-16 / 5e-16 / 4e-16 |
-| 50 | 20 | 1001 | 0.015 / 0.018 / 0.013 | 0.22 / 0.19 / 0.20 | 3.8 / 3.0 / 2.7 | 9e-16 / 9e-16 / 1e-15 |
-| 50 | 50 | 2501 | 0.045 / 0.046 / 0.026 | 0.70 / 0.52 / 0.43 | 9.9 / 7.9 / 6.9 | 1e-14 / 2e-14 / 2e-14 |
-| 50 | 100 | 5001 | 0.099 / 0.094 / 0.082 | 1.59 / 2.05 / 1.48 | 20.0 / 15.9 / 13.9 | 9e-16 / 9e-16 / 1e-15 |
-| 100 | 20 | 2001 | 0.108 / 0.108 / 0.067 | 2.35 / 1.06 / 0.70 | 15.1 / 12.2 / 10.6 | 2e-15 / 1e-15 / 1e-15 |
-| 100 | 50 | 5001 | 0.257 / 0.404 / 0.257 | 3.56 / 6.45 / 3.73 | 39.3 / 31.4 / 27.4 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 100 | 10001 | 0.451 / 1.079 / 0.498 | 8.90 / 9.13 / 9.94 | 79.5 / 63.4 / 55.4 | 1e-15 / 1e-15 / 1e-15 |
+![Factorisation and solve times against the number of unknowns](benchmark/time.svg)
 
-**$h = 4$** (eighth-order centred differences):
+What the figures show:
 
-| r | N_s | unknowns | factor (s): UMFPACK / BEM / BED | solve (ms): UMFPACK / BEM / BED | memory (MB): UMFPACK / BEM / BED | residual: UMFPACK / BEM / BED |
-|---:|---:|---:|:---:|:---:|:---:|:---:|
-| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.01 / 0.02 / 0.01 | 0.1 / 0.1 / 0.1 | 7e-16 / 8e-16 / 8e-16 |
-| 5 | 50 | 251 | 0.001 / 0.001 / 0.001 | 0.02 / 0.02 / 0.01 | 0.3 / 0.2 / 0.2 | 2e-15 / 2e-15 / 2e-15 |
-| 5 | 100 | 501 | 0.002 / 0.001 / 0.002 | 0.05 / 0.03 / 0.03 | 0.7 / 0.4 / 0.4 | 5e-16 / 5e-16 / 5e-16 |
-| 10 | 20 | 201 | 0.002 / 0.001 / 0.001 | 0.04 / 0.02 / 0.04 | 0.4 / 0.3 / 0.2 | 2e-15 / 2e-15 / 2e-15 |
-| 10 | 50 | 501 | 0.005 / 0.004 / 0.003 | 0.08 / 0.05 / 0.07 | 1.3 / 0.9 / 0.7 | 1e-15 / 1e-15 / 1e-15 |
-| 10 | 100 | 1001 | 0.010 / 0.008 / 0.006 | 0.14 / 0.14 / 0.11 | 2.7 / 1.8 / 1.5 | 8e-16 / 8e-16 / 7e-16 |
-| 50 | 20 | 1001 | 0.067 / 0.101 / 0.051 | 0.66 / 0.57 / 0.37 | 10.8 / 7.4 / 6.1 | 2e-15 / 1e-15 / 1e-15 |
-| 50 | 50 | 2501 | 0.180 / 0.286 / 0.147 | 2.73 / 2.90 / 1.82 | 31.2 / 21.2 / 17.5 | 5e-15 / 5e-15 / 5e-15 |
-| 50 | 100 | 5001 | 0.417 / 0.727 / 0.395 | 6.29 / 6.25 / 5.02 | 65.4 / 44.2 / 36.5 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 20 | 2001 | 0.291 / 0.645 / 0.304 | 3.27 / 4.05 / 2.26 | 43.0 / 29.5 / 24.3 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 50 | 5001 | 0.879 / 3.841 / 2.010 | 11.09 / 12.36 / 8.78 | 124.7 / 84.7 / 69.9 | 9e-15 / 9e-15 / 9e-15 |
-| 100 | 100 | 10001 | 1.876 / 9.043 / 4.401 | 25.25 / 25.87 / 18.78 | 261.0 / 176.7 / 145.9 | 5e-15 / 5e-15 / 5e-15 |
+* **Memory** grows linearly with the number of unknowns for all three solvers,
+  with the same slope: the wrap-around fill of UMFPACK is confined to a few
+  block columns, and the banded factorisation has no fill outside the band. The
+  bordered factorisation takes about 0.7–0.8 times the memory of UMFPACK with
+  BEM, and 0.55–0.7 times with BED.
+* **One solve** takes about as long as with UMFPACK: mostly a little less, by up
+  to ~25% for $r = 100$, $h = 4$; for $r = 100$, $h = 1$ BEM is ~10% slower.
+* **Factorisation** is faster for small blocks, but slower for large ones: for
+  $r = 100$ about 2.5× (BEM) and 1.4× (BED) the time of UMFPACK with $h = 1$, and
+  5× and 2.6× with $h = 4$. The banded LU of $A$ is cheap; the cost is in the
+  $p = hr + 1$ solves with $A^\top$ for $W$ and, for BEM, the $p$ solves with $A$
+  for $V$.
 
-What the numbers say:
+In the small example of the sparsity figure the bordered factorisation stores
+more numbers than UMFPACK, because there the dense $W$ and $V$ ($p/n \approx 0.1$)
+weigh more than the band; for the larger cases of the benchmark it stores less.
 
-* **Memory**: the factorisation takes less than UMFPACK's, by 20–35% with BEM
-  and by 30–45% with BED.
-* **Solves** (what a preconditioner repeats at every Krylov iteration) are
-  comparable to UMFPACK's, within a factor of about 2 either way (these are
-  short, noisy timings); BED is mostly faster.
-* **Factorisation** is as fast or faster for small blocks, but slower than
-  UMFPACK for large blocks, especially with a wide stencil: up to ~5× with BEM
-  and ~2.3× with BED for $r = 100$, $h = 4$. The banded LU itself is cheap; the
-  cost is in the $p$ solves with $A^\top$ for $W$ and, for BEM, the $p$ solves
-  with $A$ for $V$, with $p = hr + 1$ right-hand sides each.
-* Accuracy is the same for all three.
+Reproduce with
+
+```
+julia --project=benchmark benchmark/cyclic.jl 1      # and 4: writes benchmark/results_h1.csv, results_h4.csv
+julia --project=benchmark benchmark/sparsity.jl
+python3 benchmark/plot.py
+```
 
 ## Tests
 

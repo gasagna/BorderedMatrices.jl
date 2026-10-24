@@ -2,9 +2,11 @@ using BorderedMatrices
 using LinearAlgebra, SparseArrays, Random, Test
 using BandedMatrices: BandedMatrix, bandwidths
 
-# a random bordered system with element type T, top left block built by `mkA`
-function system(mkA, T, n, p)
-    M = BorderedMatrix(mkA(T, n), rand(T, n, p), rand(T, n, p), rand(T, p, p))
+# a random bordered system with element type T, top left block built by `mkA`,
+# dense or sparse borders
+function system(mkA, T, n, p; sparseborders = false)
+    B, C = sparseborders ? (sprand(T, n, p, 0.1), sprand(T, n, p, 0.1)) : (rand(T, n, p), rand(T, n, p))
+    M = BorderedMatrix(mkA(T, n), B, C, rand(T, p, p))
     r = BorderedVector(rand(T, n), rand(T, p))
     return M, r
 end
@@ -32,12 +34,14 @@ end
     @test M == [1 2 5; 3 4 6; 7 8 9]                         # the bottom block is Cᵀ
     @test_throws DimensionMismatch BorderedMatrix(A, B, C, fill(9, 2, 2))
     @test_throws MethodError BorderedMatrix(A, B, C, fill(9.0, 1, 1))   # one element type
+    @test_throws MethodError BorderedMatrix(A, sparse(B), C, D)         # B and C of the same type
 end
 
 @testset "solves" begin
     Random.seed!(0)
-    for T in (Float64, ComplexF64), mkA in (dense, sparse_, banded), p in (1, 3), alg in (:BEM, :BED)
-        M, r = system(mkA, T, 40, p)
+    for T in (Float64, ComplexF64), mkA in (dense, sparse_, banded), p in (1, 3), alg in (:BEM, :BED),
+        sparseborders in (false, true)
+        M, r = system(mkA, T, 40, p; sparseborders)
         z = Matrix(M) \ collect(r)
         F = lu(M; alg = alg)
         @test F \ r ≈ z
@@ -77,12 +81,24 @@ end
     # border: the last h slices and the extra unknown
     n = N - (h*r + 1)
     A = BandedMatrix(sparse(K[1:n, 1:n]))
-    M = BorderedMatrix(A, K[1:n, n+1:N], Matrix(transpose(K[n+1:N, 1:n])), K[n+1:N, n+1:N])
+    Ks = sparse(K)                                           # sparse borders: mostly zero
+    M = BorderedMatrix(A, Ks[1:n, n+1:N], sparse(transpose(Ks[n+1:N, 1:n])), K[n+1:N, n+1:N])
     @test Matrix(M) == K
     @test all(bandwidths(A) .< (h + 1)*r)                    # the wrap-around is in the border
     b = rand(N)
     for alg in (:BEM, :BED)
         z = lu(M; alg = alg) \ BorderedVector(b[1:n], b[n+1:N])
         @test z ≈ K \ b
+    end
+end
+
+allocs(F, s) = @allocated ldiv!(F, s)
+
+@testset "solves do not allocate" begin
+    for mkA in (dense, banded), alg in (:BEM, :BED), sparseborders in (false, true)
+        M, r = system(mkA, Float64, 50, 3; sparseborders)
+        F = lu(M; alg = alg)
+        allocs(F, copy(r))                           # compile
+        @test allocs(F, copy(r)) == 0
     end
 end

@@ -23,19 +23,20 @@ Base.similar(v::BorderedVector) = BorderedVector(similar(v.x), similar(v.y))
 
 The matrix `[A B; Cᵀ D]`: `A` is `n × n` (any matrix type whose factorisation
 supports `ldiv!` with the matrix and with its transpose), `B` and `C` are
-`n × p` and `D` is `p × p`. Note that the bottom block is `Cᵀ`, the transpose
+`n × p` matrices of the same type (dense, or sparse when the border is mostly
+zero) and `D` is a dense `p × p` matrix. Note that the bottom block is `Cᵀ`, the transpose
 of `C`, also for complex matrices.
 """
-struct BorderedMatrix{T, M<:AbstractMatrix{T}} <: AbstractMatrix{T}
+struct BorderedMatrix{T, M<:AbstractMatrix{T}, N<:AbstractMatrix{T}} <: AbstractMatrix{T}
     A::M
-    B::Matrix{T}
-    C::Matrix{T}
+    B::N
+    C::N
     D::Matrix{T}
-    function BorderedMatrix(A::M, B::Matrix{T}, C::Matrix{T}, D::Matrix{T}) where {T, M<:AbstractMatrix{T}}
+    function BorderedMatrix(A::M, B::N, C::N, D::Matrix{T}) where {T, M<:AbstractMatrix{T}, N<:AbstractMatrix{T}}
         n, p = size(A, 1), size(D, 1)
         size(A) == (n, n) && size(B) == size(C) == (n, p) && size(D) == (p, p) ||
             throw(DimensionMismatch("blocks must be n × n, n × p, n × p and p × p"))
-        return new{T, M}(A, B, C, D)
+        return new{T, M, N}(A, B, C, D)
     end
 end
 
