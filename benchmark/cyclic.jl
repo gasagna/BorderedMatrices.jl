@@ -1,7 +1,7 @@
 # Benchmark: cyclic block-banded matrices with one dense border row and column, solved
 #   (a) with UMFPACK's sparse LU of the whole matrix, and
 #   (b) as a banded matrix bordered by its last h slices and the extra unknown, with the banded
-#       LU of BandedMatrices.jl for the interior and BEM for the border,
+#       LU of the package (bandedlu) for the interior and BEM for the border,
 #   (c) the same with plain block elimination (BED).
 # Ns slices of r unknowns; each slice couples to the h slices on each side (periodically).
 #
@@ -10,9 +10,8 @@
 # Writes benchmark/results_h<h>.csv: factorisation time, time of one solve (s), memory of the
 # factorisation (MB), relative residual. benchmark/plot.py draws them.
 
-using BorderedMatrices, BandedMatrices, LinearAlgebra, SparseArrays, Random, Printf
+using BorderedMatrices, LinearAlgebra, SparseArrays, Random, Printf
 
-bandedlu(A) = lu(BandedMatrix(A))     # the conversion from sparse is included in the timings
 
 # the bordered matrix of K: interior slices in A (banded), the last p unknowns as the border
 function bordered(K, p)
@@ -51,16 +50,17 @@ for r in (5, 10, 20, 50, 100, 200), Ns in (20, 50, 100, 200, 500, 1000)
     Fu  = nothing; GC.gc()
     # (b) banded interior + border of the last h slices and the extra unknown
     M   = bordered(K, h * r + 1)
+    kb  = (h + 1) * r - 1                           # bandwidths of A
     rb  = BorderedVector(b[1:N-h*r-1], b[N-h*r:N])
-    tfb = @elapsed(Fb = lu(bordered(K, h * r + 1); factorize = bandedlu))
-    k > 1 && (tfb = min(tfb, best(() -> lu(bordered(K, h * r + 1); factorize = bandedlu), k - 1)))
+    tfb = @elapsed(Fb = lu(bordered(K, h * r + 1); factorize = A -> bandedlu(A, kb, kb)))
+    k > 1 && (tfb = min(tfb, best(() -> lu(bordered(K, h * r + 1); factorize = A -> bandedlu(A, kb, kb)), k - 1)))
     tsb = best(() -> Fb \ rb, 20)
     xb  = collect(Fb \ rb)
     mb  = (Base.summarysize(Fb.A) + sizeof(Fb.W) + sizeof(Fb.V)) / 1e6       # B, C, D belong to M
     Fb = nothing; GC.gc()
     # (c) the same with plain block elimination (no V = A⁻¹B)
-    tfd = @elapsed(Fd = lu(bordered(K, h * r + 1); alg = :BED, factorize = bandedlu))
-    k > 1 && (tfd = min(tfd, best(() -> lu(bordered(K, h * r + 1); alg = :BED, factorize = bandedlu), k - 1)))
+    tfd = @elapsed(Fd = lu(bordered(K, h * r + 1); alg = :BED, factorize = A -> bandedlu(A, kb, kb)))
+    k > 1 && (tfd = min(tfd, best(() -> lu(bordered(K, h * r + 1); alg = :BED, factorize = A -> bandedlu(A, kb, kb)), k - 1)))
     tsd = best(() -> Fd \ rb, 20)
     xd  = collect(Fd \ rb)
     md  = (Base.summarysize(Fd.A) + sizeof(Fd.W)) / 1e6

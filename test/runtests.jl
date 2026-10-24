@@ -1,6 +1,5 @@
 using BorderedMatrices
 using LinearAlgebra, SparseArrays, Random, Test
-using BandedMatrices: BandedMatrix, bandwidths
 
 # a random bordered system with element type T, top left block built by `mkA`,
 # dense or sparse borders
@@ -12,7 +11,7 @@ function system(mkA, T, n, p; sparseborders = false)
 end
 dense(T, n)   = rand(T, n, n) + n*I
 sparse_(T, n) = sprand(T, n, n, 0.2) + n*I
-banded(T, n)  = BandedMatrix(spdiagm(-2 => rand(T, n-2), 0 => rand(T, n) .+ 10, 3 => rand(T, n-3)))
+banded(T, n)  = spdiagm(-2 => rand(T, n-2), 0 => rand(T, n) .+ 10, 3 => rand(T, n-3))   # factorised by bandedlu
 
 @testset "BorderedVector" begin
     v = BorderedVector([1.0, 2, 3], [4.0, 5])
@@ -43,7 +42,7 @@ end
         sparseborders in (false, true)
         M, r = system(mkA, T, 40, p; sparseborders)
         z = Matrix(M) \ collect(r)
-        F = lu(M; alg = alg)
+        F = lu(M; alg = alg, factorize = mkA === banded ? (A -> bandedlu(A, 2, 3)) : lu)
         @test F \ r ≈ z
         @test F \ r ≈ z                                       # a solve does not modify F
         s = copy(r); ldiv!(F, s)
@@ -80,14 +79,14 @@ end
     K[1:N-1, N] = rand(N - 1); K[N, 1:N-1] = rand(N - 1)
     # border: the last h slices and the extra unknown
     n = N - (h*r + 1)
-    A = BandedMatrix(sparse(K[1:n, 1:n]))
     Ks = sparse(K)                                           # sparse borders: mostly zero
-    M = BorderedMatrix(A, Ks[1:n, n+1:N], sparse(transpose(Ks[n+1:N, 1:n])), K[n+1:N, n+1:N])
+    M = BorderedMatrix(Ks[1:n, 1:n], Ks[1:n, n+1:N], sparse(transpose(Ks[n+1:N, 1:n])), K[n+1:N, n+1:N])
     @test Matrix(M) == K
-    @test all(bandwidths(A) .< (h + 1)*r)                    # the wrap-around is in the border
+    kb = (h + 1)*r - 1                                       # the wrap-around is in the border:
+    @test all(abs(i - j) <= kb for (i, j) in zip(findnz(M.A)[1:2]...))   # A is banded
     b = rand(N)
     for alg in (:BEM, :BED)
-        z = lu(M; alg = alg) \ BorderedVector(b[1:n], b[n+1:N])
+        z = lu(M; alg = alg, factorize = A -> bandedlu(A, kb, kb)) \ BorderedVector(b[1:n], b[n+1:N])
         @test z ≈ K \ b
     end
 end
@@ -97,21 +96,38 @@ allocs(F, s) = @allocated ldiv!(F, s)
 @testset "solves do not allocate" begin
     for mkA in (dense, banded), alg in (:BEM, :BED), sparseborders in (false, true)
         M, r = system(mkA, Float64, 50, 3; sparseborders)
-        F = lu(M; alg = alg)
+        F = lu(M; alg = alg, factorize = mkA === banded ? (A -> bandedlu(A, 2, 3)) : lu)
         allocs(F, copy(r))                           # compile
         @test allocs(F, copy(r)) == 0
     end
 end
 
-@testset "blocked banded solves (BandedMatrices extension)" begin
-    ext = Base.get_extension(BorderedMatrices, :BorderedMatricesBandedMatricesExt)
-    @test ext !== nothing
+@testset "bandedlu" begin
     Random.seed!(6)
     for T in (Float64, ComplexF64), n in (1, 5, 63, 64, 65, 300), (kl, ku) in ((0, 0), (1, 0), (0, 2), (3, 2), (17, 40), (70, 70)),
-        m in (1, 7)
-        F = lu(BandedMatrix(rand(T, n, n), (kl, ku)))    # not diagonally dominant: rows are interchanged
-        X = rand(T, n, m)
-        @test ext.blocked_solve!(F, copy(X)) ≈ ldiv!(F, copy(X))
-        @test ext.blocked_tsolve!(F, copy(X)) ≈ ldiv!(transpose(F), copy(X))
+        m in (0, 1, 7)
+        # a banded matrix, not diagonally dominant: rows are interchanged
+        A = [i - j <= kl && j - i <= ku ? rand(T) : zero(T) for i in 1:n, j in 1:n]
+        F = bandedlu(A, kl, ku)
+        X = m == 0 ? rand(T, n) : rand(T, n, m)              # m = 0: a vector (gbtrs)
+        @test F \ X ≈ A \ X
+        @test transpose(F) \ X ≈ transpose(A) \ X
+        @test ldiv!(F, copy(X)) ≈ A \ X
+        # blocked and LAPACK solves agree, whatever the bandwidth
+        if m > 0
+            Y = copy(X); BorderedMatrices._lsolve!(F, Y); BorderedMatrices._usolve!(F, Y)
+            @test Y ≈ LAPACK.gbtrs!('N', kl, ku, n, F.AB, F.ipiv, copy(X))
+            Y = copy(X); BorderedMatrices._utsolve!(F, Y); BorderedMatrices._ltsolve!(F, Y)
+            @test Y ≈ LAPACK.gbtrs!('T', kl, ku, n, F.AB, F.ipiv, copy(X))
+        end
     end
+    A = rand(ComplexF64, 6, 6) + 6I; F = bandedlu(A, 5, 5); b = rand(ComplexF64, 6)
+    @test adjoint(F) \ b ≈ adjoint(A) \ b
+    # A given directly in band storage
+    A = [i - j <= 2 && j - i <= 1 ? rand() + 4(i == j) : 0.0 for i in 1:20, j in 1:20]
+    AB = zeros(2*2 + 1 + 1, 20)
+    for j in 1:20, i in max(1, j - 1):min(20, j + 2)
+        AB[2 + 1 + 1 + i - j, j] = A[i, j]
+    end
+    @test bandedlu!(AB, 2, 1) \ ones(20) ≈ A \ ones(20)
 end

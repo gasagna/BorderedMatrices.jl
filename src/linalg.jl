@@ -6,8 +6,7 @@
 # by block elimination, reusing a factorisation of A:
 #   1. the public interface, lu and \;
 #   2. BED, plain block elimination: factorisation and solve;
-#   3. BEM, mixed block elimination: factorisation and solve;
-#   4. solves with many right-hand sides, used to compute W and V.
+#   3. BEM, mixed block elimination: factorisation and solve.
 
 """
     BorderedMatrixLU{T}
@@ -24,11 +23,11 @@ abstract type BorderedMatrixLU{T} <: Factorization{T} end
 """
     lu(M::BorderedMatrix; alg = :BEM, factorize = lu)
 
-Factorise `M`. `factorize` is applied to `A` (`lu` for a dense, sparse or
-`BandedMatrix` `A`; `lu!` to factorise it in place). `alg` is `:BEM`, the mixed
-block elimination of Govaerts and Pryce, stable when `A` is nearly singular, or
-`:BED`, the plain block elimination, which is inaccurate when `A` is
-ill-conditioned but does not store `A⁻¹B`.
+Factorise `M`. `factorize` is applied to `A`: `lu` for a dense or sparse `A`,
+`lu!` to factorise a dense `A` in place, `A -> bandedlu(A, kl, ku)` for a banded
+`A`. `alg` is `:BEM`, the mixed block elimination of Govaerts and Pryce, stable
+when `A` is nearly singular, or `:BED`, the plain block elimination, which is
+inaccurate when `A` is ill-conditioned but does not store `A⁻¹B`.
 """
 function LinearAlgebra.lu(M::BorderedMatrix; alg::Symbol = :BEM, factorize = lu)
     alg === :BEM && return BEMFactorization(factorize(M.A), M)
@@ -53,7 +52,7 @@ struct BEDFactorization{T, F, N<:AbstractMatrix{T}} <: BorderedMatrixLU{T}
 end
 
 function BEDFactorization(Af, M::BorderedMatrix{T}) where {T}
-    W = _tsolve!(Af, Matrix(M.C))
+    W = ldiv!(transpose(Af), Matrix(M.C))
     S = lu(M.D - transpose(W) * M.B)
     return BEDFactorization{T, typeof(Af), typeof(M.B)}(Af, M.B, W, S)
 end
@@ -91,8 +90,8 @@ struct BEMFactorization{T, F, N<:AbstractMatrix{T}} <: BorderedMatrixLU{T}
 end
 
 function BEMFactorization(Af, M::BorderedMatrix{T}) where {T}
-    W  = _tsolve!(Af, Matrix(M.C))              # W and V are dense even if B and C are sparse
-    V  = _solve!(Af, Matrix(M.B))
+    W  = ldiv!(transpose(Af), Matrix(M.C))      # W and V are dense even if B and C are sparse
+    V  = ldiv!(Af, Matrix(M.B))
     Sw = lu(M.D - transpose(W) * M.B)
     Sv = lu(M.D - transpose(M.C) * V)
     return BEMFactorization{T, typeof(Af), typeof(M.B)}(Af, M.B, M.C, M.D, W, V, Sw, Sv, zeros(T, size(M.D, 1)))
@@ -116,11 +115,3 @@ function LinearAlgebra.ldiv!(F::BEMFactorization{T}, r::BorderedVector{T}) where
     return r
 end
 
-
-# ~~~ 4. Solves with many right-hand sides ~~~
-#
-# W and V need p solves with Aᵀ and A at once. By default the factorisation's own ldiv!
-# is used; the extension for BandedMatrices.jl replaces it with a blocked solve.
-
-_solve!(F, X)  = ldiv!(F, X)               # X ← A⁻¹ X
-_tsolve!(F, X) = ldiv!(transpose(F), X)    # X ← A⁻ᵀ X

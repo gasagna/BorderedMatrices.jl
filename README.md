@@ -24,8 +24,8 @@ border is usually thin, $p \ll n$.
 The package is meant for direct linear algebra on stored arrays: every block is
 a matrix and every part of a vector is a vector, all with the same element
 type. $A$ can be any matrix whose factorisation supports `ldiv!` with the
-matrix and with its transpose (a dense `Matrix`, a `SparseMatrixCSC`, a
-`BandedMatrix` from [BandedMatrices.jl](https://github.com/JuliaLinearAlgebra/BandedMatrices.jl), ...);
+matrix and with its transpose (a dense `Matrix`, a `SparseMatrixCSC`, or a
+banded matrix factorised with the package's own `bandedlu`);
 $B$ and $C$ are matrices of the same type, dense or sparse; $D$ is a dense
 `Matrix`.
 
@@ -132,31 +132,32 @@ the conjugate transpose $C^{\mathsf H}$: to border with $C^{\mathsf H}$, pass
 
 ## Banded $A$
 
-For a banded $A$ use a `BandedMatrix` from
-[BandedMatrices.jl](https://github.com/JuliaLinearAlgebra/BandedMatrices.jl):
-`lu` then gives a banded LU (LAPACK `gbtrf`), with storage
-$(2k_l + k_u + 1)\,n$ for $k_l$ sub- and $k_u$ super-diagonals and no fill
-outside the band. No conversion is needed if $A$ is assembled as a
-`BandedMatrix` in the first place.
+`bandedlu(A, kl, ku)` computes the LU factorisation with partial pivoting
+(LAPACK `gbtrf`) of a matrix `A` of any type with $k_l$ sub- and $k_u$
+super-diagonals, copying its band into LAPACK band storage; the factors take
+$(2k_l + k_u + 1)\,n$ numbers and there is no fill outside the band. Pass it to
+`lu` as `factorize`:
 
 ```julia
-using BandedMatrices
-A = BandedMatrix(...)                      # n × n, bandwidths (kl, ku)
-F = lu(BorderedMatrix(A, B, C, D))
+F = lu(BorderedMatrix(A, B, C, D); factorize = A -> bandedlu(A, kl, ku))
 ```
+
+`bandedlu!(AB, kl, ku)` factorises a matrix assembled directly in band storage,
+$A_{ij}$ in `AB[kl + ku + 1 + i - j, j]` with `AB` of size
+$(2k_l + k_u + 1)\times n$, without any copy. The factorisation (a `BandedLU`)
+supports `ldiv!` and `\` with the matrix and with its transpose.
 
 ### Blocked solves with many right-hand sides
 
 Factorising the bordered matrix needs $p$ solves with $A^\top$ (for
 $W = A^{-\top}C$) and, for BEM, $p$ solves with $A$ (for $V = A^{-1}B$), all at
-once. LAPACK's banded solve, `gbtrs`, which `ldiv!` calls for a `BandedMatrix`,
-handles one right-hand side at a time with matrix–vector operations. For wide
+once. LAPACK's banded solve, `gbtrs`, handles one right-hand side at a time with matrix–vector operations. For wide
 bands and many right-hand sides this dominates the cost of `lu`, even though
 the banded LU itself runs at matrix–matrix speed.
 
-When BandedMatrices.jl is loaded, a package extension replaces these $2p$ solves
-by blocked ones that use the same factors (and therefore the same partial
-pivoting) but work on blocks of $n_b = 64$ columns of $L$ and rows of $U$:
+For a matrix of right-hand sides, `ldiv!` with a `BandedLU` therefore uses
+blocked solves instead: the same factors (and so the same partial pivoting),
+applied by blocks of $n_b = 64$ columns of $L$ and rows of $U$:
 
 * **$X \leftarrow L^{-1}PX$.** For the columns $J = j_0, \dots, j_1$ of a block,
   copy the multipliers of $L$ into a dense $(n_b + k_l)\times n_b$ unit lower
@@ -178,8 +179,9 @@ pivoting) but work on blocks of $n_b = 64$ columns of $L$ and rows of $U$:
   last block to the first, with the row interchanges undone at the end of each
   block.
 
-The result equals that of `gbtrs` up to rounding. The extension is used only
-when $k_l \ge 48$: for narrower bands `gbtrs` is as fast or faster. The speed-up,
+The result equals that of `gbtrs` up to rounding. The blocked solves are used
+only when $k_l \ge 48$: for narrower bands, and for a single right-hand side,
+`ldiv!` calls `gbtrs`, which is as fast or faster there. The speed-up,
 for the $p = hr + 1$ right-hand sides of the cyclic block-banded matrices
 below, grows with the bandwidth and reaches 10–15×:
 
@@ -263,20 +265,21 @@ k_l,\ k_u \;\le\; (h + 1)\,r - 1 ,
 and BEM takes care of the border. In code, with $n = N - p$:
 
 ```julia
-using BandedMatrices, SparseArrays
+using SparseArrays
 # K: the N × N sparse matrix, ordered slice by slice, extra unknowns last
 p = h*r + q
 n = size(K, 1) - p
-M = BorderedMatrix(BandedMatrix(K[1:n, 1:n]),          # A, banded
+kb = (h + 1)*r - 1                                      # bandwidths of A
+M = BorderedMatrix(K[1:n, 1:n],                         # A, banded
                    K[1:n, n+1:end],                     # B, sparse
                    sparse(transpose(K[n+1:end, 1:n])),  # C, sparse
                    Matrix(K[n+1:end, n+1:end]))         # D
-F = lu(M)
+F = lu(M; factorize = A -> bandedlu(A, kb, kb))
 z = F \ BorderedVector(f, g)
 ```
 
-Better still, assemble the blocks directly in this form, with $A$ as a
-`BandedMatrix`, so that nothing needs converting.
+Better still, assemble $A$ directly in band storage and factorise it with
+`bandedlu!`, so that nothing needs converting.
 
 ### Memory
 
@@ -301,16 +304,16 @@ border row and column ($q = 1$). Random blocks, made diagonally dominant. Three
 solvers:
 
 * **UMFPACK**: sparse LU of the whole $(rN_s + 1)\times(rN_s + 1)$ matrix, `lu(K)`;
-* **BEM**: `lu(M)` with $A$ a `BandedMatrix`, sparse $B$ and $C$, and the last
-  $h$ slices and the extra unknown as the border;
+* **BEM**: `lu(M; factorize = A -> bandedlu(A, kb, kb))`, with sparse $A$, $B$
+  and $C$ and the last $h$ slices and the extra unknown as the border;
 * **BED**: the same with `alg = :BED`, which does not compute $V = A^{-1}B$.
 
 Memory is that of the factorisation: for UMFPACK
 $16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes (values and indices), for
 BEM/BED the banded LU of $A$, $W$ (and $V$). Times are the best of up to three
 runs on one core (`BLAS.set_num_threads(1)`) of an Intel Xeon at 2.8 GHz, with
-Julia 1.11 and BandedMatrices.jl 1.14; the factorisation time includes building
-the blocks from $K$, the conversion of $A$ to a `BandedMatrix`, and computing
+Julia 1.11; the factorisation time includes building the blocks from $K$,
+copying the band of $A$ into band storage, and computing
 $W$ (and $V$) and the Schur complements. All three solvers give the same
 residual, $\lVert Kx - b\rVert/\lVert b\rVert \approx 10^{-15}$.
 
@@ -354,4 +357,4 @@ python3 benchmark/plot.py
 julia --project -e 'using Pkg; Pkg.test()'
 ```
 
-The tests use BandedMatrices.jl, SparseArrays and Random (test dependencies only).
+The tests use SparseArrays and Random (test dependencies only). The package depends only on LinearAlgebra.

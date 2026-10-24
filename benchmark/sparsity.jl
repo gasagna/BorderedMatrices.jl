@@ -4,7 +4,7 @@
 #
 #     julia --project=benchmark benchmark/sparsity.jl     (writes benchmark/sparsity.txt)
 
-using BorderedMatrices, BandedMatrices, LinearAlgebra, SparseArrays, Random
+using BorderedMatrices, LinearAlgebra, SparseArrays, Random
 
 include(joinpath(@__DIR__, "matrices.jl"))
 
@@ -14,8 +14,9 @@ N = size(K, 1); p = h*r + 1; n = N - p
 
 F = lu(K)                                   # UMFPACK, with its own row and column ordering
 LU = F.L + F.U                              # pattern of the factors, in UMFPACK's ordering
-Fb = lu(BorderedMatrix(BandedMatrix(K[1:n, 1:n]), K[1:n, n+1:N], sparse(transpose(K[n+1:N, 1:n])), Matrix(K[n+1:N, n+1:N])))
-kl, ku = bandwidths(Fb.A.factors)           # bandwidths of the banded factors (ku grows by kl)
+kb = (h + 1)*r - 1
+Fb = lu(BorderedMatrix(K[1:n, 1:n], K[1:n, n+1:N], sparse(transpose(K[n+1:N, 1:n])), Matrix(K[n+1:N, n+1:N])); factorize = A -> bandedlu(A, kb, kb))
+kl, ku = Fb.A.kl, Fb.A.kl + Fb.A.ku          # bandwidths of the banded factors (ku grows by kl)
 
 open(joinpath(@__DIR__, "sparsity.txt"), "w") do io
     println(io, "N n p kl ku nnzK nnzLU")
