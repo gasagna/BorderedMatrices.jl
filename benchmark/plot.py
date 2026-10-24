@@ -115,4 +115,25 @@ frame(ax, f"BEM: banded LU of A (blue), V, Wᵀ (green),\nSchur complements: {st
 fig.suptitle(f"Sparsity: r = 4, Nₛ = 24, h = 2 (N = {N}, border p = {p}); dashed lines: border", fontsize=10, color=INK)
 fig.tight_layout(rect=(0, 0, 1, 0.92))
 fig.savefig(os.path.join(D, "sparsity.svg"), bbox_inches="tight"); save_preview(fig, "sparsity"); plt.close(fig)
-print("written memory.svg, time.svg, sparsity.svg")
+# speed-up of the blocked banded solves over gbtrs
+with open(os.path.join(D, "results_solves.csv")) as f:
+    S = [{k: float(v) for k, v in row.items()} for row in csv.DictReader(f)]
+HCOL = {1: "#86b6ef", 2: "#2a78d6", 4: "#081f40"}               # stencil half-width h: ordinal
+fig, axs = plt.subplots(1, 2, figsize=(9.6, 3.8), sharey=True)
+for ax, (key, title) in zip(axs, (("", "X ← A⁻¹X  (for V = A⁻¹B)"), ("_T", "X ← A⁻ᵀX  (for W = A⁻ᵀC)"))):
+    for h in HCOL:
+        R = sorted((x for x in S if x["h"] == h), key=lambda x: x["kl"])
+        ax.plot([x["kl"] for x in R], [x["gbtrs" + key] / x["blocked" + key] for x in R], "o-", ms=5, lw=1.6,
+                color=HCOL[h], label=f"h = {h}")
+    ax.axhline(1, color="#8a93a3", lw=1)
+    ax.axvline(48, color="#8a93a3", lw=1, ls="--")
+    ax.text(52, 12, "blocked solves\nused from kₗ = 48", fontsize=7, color="#4f596b")
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ax.set_xlabel("lower bandwidth kₗ of A = (h + 1) r − 1"); ax.set_title(title, fontsize=9, color=INK)
+axs[0].set_ylabel("speed-up over LAPACK gbtrs")
+axs[0].legend(frameon=False, fontsize=8, title="stencil half-width", title_fontsize=8)
+fig.suptitle("Blocked banded solves with p = h r + 1 right-hand sides (Nₛ = 100 slices of r unknowns), one core",
+             fontsize=10, color=INK)
+fig.tight_layout()
+fig.savefig(os.path.join(D, "speedup.svg"), bbox_inches="tight"); save_preview(fig, "speedup"); plt.close(fig)
+print("written memory.svg, time.svg, sparsity.svg, speedup.svg")

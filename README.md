@@ -145,6 +145,48 @@ A = BandedMatrix(...)                      # n × n, bandwidths (kl, ku)
 F = lu(BorderedMatrix(A, B, C, D))
 ```
 
+### Blocked solves with many right-hand sides
+
+Factorising the bordered matrix needs $p$ solves with $A^\top$ (for
+$W = A^{-\top}C$) and, for BEM, $p$ solves with $A$ (for $V = A^{-1}B$), all at
+once. LAPACK's banded solve, `gbtrs`, which `ldiv!` calls for a `BandedMatrix`,
+handles one right-hand side at a time with matrix–vector operations. For wide
+bands and many right-hand sides this dominates the cost of `lu`, even though
+the banded LU itself runs at matrix–matrix speed.
+
+When BandedMatrices.jl is loaded, a package extension replaces these $2p$ solves
+by blocked ones that use the same factors (and therefore the same partial
+pivoting) but work on blocks of $n_b = 64$ columns of $L$ and rows of $U$:
+
+* **$X \leftarrow L^{-1}PX$.** For the columns $J = j_0, \dots, j_1$ of a block,
+  copy the multipliers of $L$ into a dense $(n_b + k_l)\times n_b$ unit lower
+  trapezoidal matrix $\begin{bmatrix} L_{11} \\ L_{21} \end{bmatrix}$, applying to
+  each column the row interchanges of the later columns of the block (`gbtrf`
+  stores the multipliers unpermuted). Then apply the block's interchanges to
+  the rows of $X$ and
+  ```math
+  X_J \leftarrow L_{11}^{-1} X_J ,
+  \qquad
+  X_{j_1+1:\,j_1+k_l} \leftarrow X_{j_1+1:\,j_1+k_l} - L_{21} X_J ,
+  ```
+  a triangular solve and a matrix product (BLAS `trsm` and `gemm`).
+* **$X \leftarrow U^{-1}X$.** From the bottom, for the rows $I$ of a block,
+  $X_I \leftarrow U_{II}^{-1} X_I$, then subtract $U_{\cdot I} X_I$ from the
+  $k_l + k_u$ rows above.
+* **$X \leftarrow A^{-\top}X$** is the transpose of the two steps, in reverse
+  order: $U^{-\top}$ from the top, then $L_{11}^{-\top}$ and $L_{21}^\top$ from the
+  last block to the first, with the row interchanges undone at the end of each
+  block.
+
+The result equals that of `gbtrs` up to rounding. The extension is used only
+when $k_l \ge 48$: for narrower bands `gbtrs` is as fast or faster. The speed-up,
+for the $p = hr + 1$ right-hand sides of the cyclic block-banded matrices
+below, grows with the bandwidth and reaches 10–15×:
+
+![Speed-up of the blocked banded solves over gbtrs](benchmark/speedup.svg)
+
+Reproduce with `julia --project=benchmark benchmark/solves.jl`.
+
 ## Cyclic block-banded matrices
 
 ### The matrix

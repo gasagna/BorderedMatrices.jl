@@ -6,9 +6,16 @@ version = "0.2.0"
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
+[weakdeps]
+BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
+
+[extensions]
+BorderedMatricesBandedMatricesExt = "BandedMatrices"
+
 [compat]
 julia = "1.10"
 LinearAlgebra = "1"
+BandedMatrices = "1"
 
 [extras]
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

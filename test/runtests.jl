@@ -102,3 +102,16 @@ allocs(F, s) = @allocated ldiv!(F, s)
         @test allocs(F, copy(r)) == 0
     end
 end
+
+@testset "blocked banded solves (BandedMatrices extension)" begin
+    ext = Base.get_extension(BorderedMatrices, :BorderedMatricesBandedMatricesExt)
+    @test ext !== nothing
+    Random.seed!(6)
+    for T in (Float64, ComplexF64), n in (1, 5, 63, 64, 65, 300), (kl, ku) in ((0, 0), (1, 0), (0, 2), (3, 2), (17, 40), (70, 70)),
+        m in (1, 7)
+        F = lu(BandedMatrix(rand(T, n, n), (kl, ku)))    # not diagonally dominant: rows are interchanged
+        X = rand(T, n, m)
+        @test ext.blocked_solve!(F, copy(X)) ≈ ldiv!(F, copy(X))
+        @test ext.blocked_tsolve!(F, copy(X)) ≈ ldiv!(transpose(F), copy(X))
+    end
+end
