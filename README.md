@@ -252,10 +252,11 @@ UMFPACK's factors $L + U$, and what the bordered factorisation stores.
 
 ## Benchmark
 
-Cyclic block-banded matrices as above, with $N_s = 20, \dots, 200$ slices of
-$r = 5, 10, 50, 100$ unknowns, a stencil reaching $h = 1$ or $h = 4$ slices on
-each side, and one dense border row and column ($q = 1$). Random blocks, made
-diagonally dominant. Three solvers:
+Cyclic block-banded matrices as above, with $N_s = 20, \dots, 1000$ slices of
+$r = 5, 10, 20, 50, 100, 200$ unknowns (up to $r^2 N_s = 6\cdot 10^6$, i.e. a few
+GB), a stencil reaching $h = 1$ or $h = 4$ slices on each side, and one dense
+border row and column ($q = 1$). Random blocks, made diagonally dominant. Three
+solvers:
 
 * **UMFPACK**: sparse LU of the whole $(rN_s + 1)\times(rN_s + 1)$ matrix, `lu(K)`;
 * **BEM**: `lu(M)` with $A$ a `BandedMatrix`, sparse $B$ and $C$, and the last
@@ -264,31 +265,35 @@ diagonally dominant. Three solvers:
 
 Memory is that of the factorisation: for UMFPACK
 $16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes (values and indices), for
-BEM/BED the banded LU of $A$, $W$ (and $V$). Times are the best of several
+BEM/BED the banded LU of $A$, $W$ (and $V$). Times are the best of up to three
 runs on one core (`BLAS.set_num_threads(1)`) of an Intel Xeon at 2.8 GHz, with
 Julia 1.11 and BandedMatrices.jl 1.14; the factorisation time includes building
 the blocks from $K$, the conversion of $A$ to a `BandedMatrix`, and computing
 $W$ (and $V$) and the Schur complements. All three solvers give the same
 residual, $\lVert Kx - b\rVert/\lVert b\rVert \approx 10^{-15}$.
 
-![Memory of the factorisation against the number of unknowns](benchmark/memory.svg)
+![Memory of the factorisation against the number of unknowns, and ratio to UMFPACK](benchmark/memory.svg)
 
 ![Factorisation and solve times against the number of unknowns](benchmark/time.svg)
 
 What the figures show:
 
-* **Memory** grows linearly with the number of unknowns for all three solvers,
-  with the same slope: the wrap-around fill of UMFPACK is confined to a few
-  block columns, and the banded factorisation has no fill outside the band. The
-  bordered factorisation takes about 0.7–0.8 times the memory of UMFPACK with
-  BEM, and 0.55–0.7 times with BED.
-* **One solve** takes about as long as with UMFPACK: mostly a little less, by up
-  to ~25% for $r = 100$, $h = 4$; for $r = 100$, $h = 1$ BEM is ~10% slower.
-* **Factorisation** is faster for small blocks, but slower for large ones: for
-  $r = 100$ about 2.5× (BEM) and 1.4× (BED) the time of UMFPACK with $h = 1$, and
-  5× and 2.6× with $h = 4$. The banded LU of $A$ is cheap; the cost is in the
-  $p = hr + 1$ solves with $A^\top$ for $W$ and, for BEM, the $p$ solves with $A$
-  for $V$.
+* **Memory** grows linearly with the number of unknowns for all three solvers.
+  The ratio to UMFPACK is nearly constant: with $h = 4$ about 0.68 for BEM and
+  0.56 for BED, for every $r$ and $N_s$; with $h = 1$ about 0.75–0.8 and
+  0.63–0.7, rising towards 0.95 for the largest $N_s$, where UMFPACK's memory
+  grows a little more slowly than linearly.
+* **One solve** takes about as long as with UMFPACK: with $h = 4$ mostly
+  10–50% less; with $h = 1$ anything from about 2× faster to 1.5× slower (these
+  are short timings, and noisy).
+* **Factorisation** is faster for small blocks but slower for large ones: for
+  $r = 200$, $h = 4$ about 6× (BEM) and 3× (BED) the time of UMFPACK; for
+  $r = 200$, $h = 1$ about 2.5× and 1.3×. The banded LU of $A$ is not the
+  problem: it runs at about 35 GFlop/s. The cost is in the $p = hr + 1$ solves
+  with $A^\top$ for $W$ and, for BEM, the $p$ solves with $A$ for $V$: LAPACK's
+  banded solve (`gbtrs`) treats one right-hand side at a time and runs at about
+  2.5 GFlop/s here (for $r = N_s = 100$, $h = 4$), against about 59 GFlop/s for
+  a dense matrix product on the same core.
 
 In the small example of the sparsity figure the bordered factorisation stores
 more numbers than UMFPACK, because there the dense $W$ and $V$ ($p/n \approx 0.1$)

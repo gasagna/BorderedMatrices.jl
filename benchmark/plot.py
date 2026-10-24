@@ -15,7 +15,7 @@ plt.rcParams.update({"font.family": "sans-serif", "font.size": 9, "axes.spines.t
                      "grid.linewidth": 0.6, "axes.edgecolor": "#8a93a3", "axes.labelcolor": "#2b3140",
                      "xtick.color": "#4f596b", "ytick.color": "#4f596b"})
 INK = "#2b3140"
-RCOL = {5: "#389826", 10: "#4063d8", 50: "#9558b2", 100: "#cb3c33"}          # block size r
+RCOL = {5: "#86b6ef", 10: "#5598e7", 20: "#2a78d6", 50: "#1c5cab", 100: "#104281", 200: "#081f40"}   # block size r: ordinal blue ramp, light = small
 SOLV = {"umfpack": ("UMFPACK, lu(K)", "o", "-"),
         "bem": ("BorderedMatrices, BEM", "s", "--"),
         "bed": ("BorderedMatrices, BED", "^", ":")}
@@ -27,7 +27,7 @@ def load(h):
 def legend(fig):
     hs = [Line2D([], [], color=RCOL[r], lw=2, label=f"r = {r}") for r in RCOL]
     hs += [Line2D([], [], color=INK, ls=ls, marker=m, ms=5, lw=1.4, label=lab) for lab, m, ls in SOLV.values()]
-    fig.legend(handles=hs, loc="lower center", ncol=7, frameon=False, fontsize=8, bbox_to_anchor=(0.5, -0.02))
+    fig.legend(handles=hs, loc="lower center", ncol=9, frameon=False, fontsize=8, bbox_to_anchor=(0.5, -0.02))
 
 def panel(ax, rows, key, scale, ylabel, title):
     for r in RCOL:
@@ -44,12 +44,23 @@ def save_preview(fig, name):                     # optional PNG copies, for chec
     if os.environ.get("PREVIEW"):
         fig.savefig(os.path.join(os.environ["PREVIEW"], name + ".png"), dpi=110, bbox_inches="tight")
 
-# memory
-fig, axs = plt.subplots(1, 2, figsize=(9.6, 3.9), sharey=True)
-for ax, h in zip(axs, (1, 4)):
-    panel(ax, rows[h], "mem", 1.0, "memory of the factorisation (MB)", f"stencil reaching h = {h} slice{'s' if h > 1 else ''} on each side")
-fig.suptitle("Memory: cyclic block-banded matrix, Nₛ = 20 … 200 slices of r unknowns", fontsize=10, color=INK)
-legend(fig); fig.tight_layout(rect=(0, 0.07, 1, 1))
+# memory: absolute, and relative to UMFPACK
+fig, axs = plt.subplots(2, 2, figsize=(10.5, 7.4))
+for j, h in enumerate((1, 4)):
+    panel(axs[0, j], rows[h], "mem", 1.0, "memory of the factorisation (MB)", f"stencil reaching h = {h} slice{'s' if h > 1 else ''} on each side")
+    ax = axs[1, j]
+    for r in RCOL:
+        R = sorted((x for x in rows[h] if x["r"] == r), key=lambda x: x["N"])
+        for s_ in ("bem", "bed"):
+            lab, m, ls = SOLV[s_]
+            ax.plot([x["N"] for x in R], [x[f"mem_{s_}"] / x["mem_umfpack"] for x in R], ls=ls, marker=m,
+                    ms=4, lw=1.4, color=RCOL[r])
+    ax.axhline(1, color="#8a93a3", lw=1)
+    ax.set_xscale("log"); ax.set_ylim(0, 1.2)
+    ax.set_xlabel("unknowns  N = r·Nₛ + 1"); ax.set_ylabel("memory / memory of UMFPACK")
+    ax.set_title(f"h = {h}: ratio to UMFPACK (below 1: less memory)", fontsize=9, color=INK)
+fig.suptitle("Memory: cyclic block-banded matrix, Nₛ slices of r unknowns", fontsize=10, color=INK)
+legend(fig); fig.tight_layout(rect=(0, 0.05, 1, 1))
 fig.savefig(os.path.join(D, "memory.svg"), bbox_inches="tight"); save_preview(fig, "memory"); plt.close(fig)
 
 # time
@@ -83,7 +94,7 @@ ax = axs[0]
 inner = [(i, j) for i, j in zip(Ki, Kj) if i <= n and j <= n]
 bord = [(i, j) for i, j in zip(Ki, Kj) if i > n or j > n]
 ax.scatter([j for i, j in inner], [i for i, j in inner], s=1.2, c="#4063d8", marker="s", lw=0)
-ax.scatter([j for i, j in bord], [i for i, j in bord], s=1.2, c="#cb3c33", marker="s", lw=0)
+ax.scatter([j for i, j in bord], [i for i, j in bord], s=1.2, c="#e0712c", marker="s", lw=0)
 border_lines(ax)
 frame(ax, f"K: {nnzK} nonzeros\n(A in blue, border in red)")
 ax = axs[1]
