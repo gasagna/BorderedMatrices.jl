@@ -4,7 +4,7 @@
 
 # BorderedMatrices.jl
 
-Solve bordered linear systems
+Direct solution of bordered linear systems
 
 ```math
 \begin{bmatrix} A & B \\ C^\top & D \end{bmatrix}
@@ -12,24 +12,32 @@ Solve bordered linear systems
 =
 \begin{bmatrix} f \\ g \end{bmatrix},
 \qquad
-A \in \mathbb{R}^{n\times n},\quad
-B,\ C \in \mathbb{R}^{n\times p},\quad
-D \in \mathbb{R}^{p\times p},
+A \in \mathbb{F}^{n\times n},\quad
+B,\ C \in \mathbb{F}^{n\times p},\quad
+D \in \mathbb{F}^{p\times p},\quad
+\mathbb{F} = \mathbb{R} \text{ or } \mathbb{C},
 ```
 
-reusing a factorisation of the large block $A$. The border is usually thin,
-$p \ll n$; for $p = 1$, $B = b$ and $C = c$ are vectors and $D = d$ is a scalar.
+by block elimination, reusing a factorisation of the large block $A$. The
+border is usually thin, $p \ll n$.
+
+The package is meant for direct linear algebra on stored arrays: every block is
+a matrix and every part of a vector is a vector, all with the same element
+type. $A$ can be any matrix whose factorisation supports `ldiv!` with the
+matrix and with its transpose (a dense `Matrix`, a `SparseMatrixCSC`, a
+`BandedMatrix` from [BandedMatrices.jl](https://github.com/JuliaLinearAlgebra/BandedMatrices.jl), ...);
+$B$, $C$ and $D$ are dense `Matrix`es.
 
 Systems of this form appear wherever a large structured operator is augmented
 by a few dense rows and columns: Newton methods for periodic orbits (the period
 as an extra unknown, a phase condition as an extra equation), pseudo-arclength
-continuation, Lagrange multipliers, deflation. Keeping the border separate lets
-$A$ be factorised by a solver that exploits its structure (sparse, banded, ...),
-which the dense border would otherwise destroy.
+continuation, Lagrange multipliers. Keeping the border separate lets $A$ be
+factorised by a solver that exploits its structure, which the dense border
+would otherwise destroy.
 
 ## Algorithms
 
-Eliminating $x$ gives the $p \times p$ Schur complement
+Eliminating $x$ gives the $p \times p$ Schur complement:
 
 ```math
 S = D - C^\top A^{-1} B ,
@@ -51,7 +59,7 @@ x = A^{-1}\left(f - B\,y\right).
 
 It is cheap, but inaccurate when $A$ is nearly singular, even if the bordered
 matrix itself is well conditioned: $W$ is then huge and $g - W^\top f$ suffers
-cancellation.
+from cancellation.
 
 **`:BEM`, mixed block elimination** (default; Govaerts and Pryce). A first pass
 as `:BED` gives $y_1$; the residual of the bordered system is then solved again
@@ -70,12 +78,12 @@ x &= \xi - V\,y_2, \qquad y = y_1 + y_2 .
 In exact arithmetic $y_2 = 0$; in floating point the second pass removes the
 error of the first. BEM is stable when $A$ is nearly singular, which is the
 usual situation when the border is precisely what makes the system nonsingular:
-for example, at a periodic orbit the phase condition removes the
-time-translation direction from the kernel of $A$.
+at a periodic orbit, for example, the time-translation direction is in the
+kernel of $A$ and the phase condition removes it.
 
-In `lu`, the matrices $W = A^{-\top}C$, $V = A^{-1}B$ (BEM only) and the LU
-factors of the two $p\times p$ Schur complements are computed **once**. Each
-solve then costs a single solve with $A$, plus $O(np)$ operations.
+`lu` computes $W$, $V$ (BEM only) and the LU factors of the $p \times p$ Schur
+complements **once**. Each solve then costs a single solve with $A$, plus
+$O(np)$ operations.
 
 > W. Govaerts and J. D. Pryce, *Mixed block elimination for linear systems with
 > wider borders*, IMA J. Numer. Anal. 13 (1993) 161–180.
@@ -87,55 +95,43 @@ solve then costs a single solve with $A$, plus $O(np)$ operations.
 ```julia
 using BorderedMatrices, LinearAlgebra, SparseArrays
 
-n = 1000
+n, p = 1000, 2
 A = sprand(n, n, 0.01) + 10I
-b, c, d = rand(n), rand(n), 0.0
+M = BorderedMatrix(A, rand(n, p), rand(n, p), zeros(p, p))   # [A B; Cᵀ D]
 
-M = BorderedMatrix(A, b, c, d)        # [A b; cᵀ d]
-F = lu(M)                             # factorises A (here sparse LU), BEM
-r = BorderedVector(rand(n), 1.0)      # [f; g]
-z = F \ r                             # z._1 = x, z._2 = y
-
-# wider border: B, C are n × p, D is p × p
-M = BorderedMatrix(A, rand(n, 3), rand(n, 3), zeros(3, 3))
-z = lu(M) \ rand(n + 3)
-
-# partition an assembled (N × N) matrix: its last p rows and columns become the border
-M = BorderedMatrix(K, p)
+F = lu(M)                                  # lu(A) (here UMFPACK), then BEM
+r = BorderedVector(rand(n), rand(p))       # [f; g]
+z = F \ r                                  # z.x = x, z.y = y
+ldiv!(F, r)                                # or in place
 ```
 
-* `lu(M; alg = :BEM, factorize = lu)`: `factorize` is applied to $A$ and can be
-  any factorisation that supports `F \ x` and `transpose(F) \ x`; e.g. `lu`
-  (dense or sparse), or `bandedlu` below.
-* `lu!(M)` factorises a dense $A$ in place.
-* The original interface `ldiv!(M, r, alg = :BEM, inplace = true)` is kept.
+* `lu(M; alg = :BEM, factorize = lu)`: `factorize` is applied to $A$; use
+  `factorize = lu!` to factorise a dense $A$ in place.
+* `alg = :BED` selects the plain block elimination.
 
 ## Real and complex matrices
 
-Everything works for real and complex element types (`Float32`, `Float64`,
-`ComplexF32`, `ComplexF64`; `lu` also for any other number type that Julia's
-`lu` supports, `bandedlu` only for these four).
+All blocks of a `BorderedMatrix`, and both parts of a `BorderedVector`, must
+have the same element type, real or complex; there is no promotion.
 
-* The bottom block is the **transpose** $C^\top$, also for complex matrices,
-  not the conjugate transpose $C^{\mathsf H}$. To border with $C^{\mathsf H}$,
-  pass `conj(C)`. The algorithms use transposed solves, $W = A^{-\top} C$,
-  consistently.
-* Mixed element types are promoted: a real $A$ with a complex border or corner
-  gives a complex `BorderedMatrix`. A `BorderedVector` keeps the element type of
-  its main part (which is not copied) unless the border is complex and the main
-  part real.
-* A real factorisation applied to a complex right-hand side solves for the real
-  and the imaginary parts separately; a complex factorisation applied to a real
-  right-hand side returns a complex solution. `ldiv!` cannot store a complex
-  solution in a real vector and throws an `ArgumentError`.
+The bottom block is the **transpose** $C^\top$, also for complex matrices, not
+the conjugate transpose $C^{\mathsf H}$: to border with $C^{\mathsf H}$, pass
+`conj(C)`. The algorithms use solves with $A^\top$ consistently.
 
-## Banded matrices
+## Banded $A$
 
-`bandedlu(A)` computes an LU factorisation with partial pivoting of a matrix
-with $k_l$ sub-diagonals and $k_u$ super-diagonals (LAPACK `gbtrf`). It stores
-$(2k_l + k_u + 1) \times n$ numbers, with no fill outside the band.
-`bandwidths(A)` returns $(k_l, k_u)$. The factorisation supports `\`, `ldiv!`,
-and solves with `transpose(F)` and `adjoint(F)`, which BEM needs.
+For a banded $A$ use a `BandedMatrix` from
+[BandedMatrices.jl](https://github.com/JuliaLinearAlgebra/BandedMatrices.jl):
+`lu` then gives a banded LU (LAPACK `gbtrf`), with storage
+$(2k_l + k_u + 1)\,n$ for $k_l$ sub- and $k_u$ super-diagonals and no fill
+outside the band. No conversion is needed if $A$ is assembled as a
+`BandedMatrix` in the first place.
+
+```julia
+using BandedMatrices
+A = BandedMatrix(...)                      # n × n, bandwidths (kl, ku)
+F = lu(BorderedMatrix(A, B, C, D))
+```
 
 ## Cyclic block-banded matrices
 
@@ -172,9 +168,9 @@ the block columns that connect the two ends.
 
 ### The ordering trick
 
-Declare as border the last $h$ slices together with the $q$ extra unknowns,
-i.e. take $p = h\,r + q$ in `BorderedMatrix(K, p)`. For the example above
-($h = 1$), slice 5 and the extra unknown become the border:
+Take as border the last $h$ slices together with the $q$ extra unknowns,
+$p = h\,r + q$. For the example above ($h = 1$), slice 5 and the extra unknown
+become the border:
 
 ```math
 A =
@@ -210,34 +206,33 @@ $B$ and $C$. So $A$ is **banded**, with
 k_l,\ k_u \;\le\; (h + 1)\,r - 1 ,
 ```
 
-and can be factorised with `bandedlu`, while BEM takes care of the border.
-In code:
+and BEM takes care of the border. In code, with $n = N - p$:
 
 ```julia
-r, Ns, h, q = 24, 583, 4, 1          # 24 unknowns per slice, 583 slices, 8th-order FD, 1 extra unknown
-# K :: SparseMatrixCSC of size r*Ns + q, ordered slice by slice, extra unknowns last
-M = BorderedMatrix(K, h*r + q)       # border = last h slices + extra unknowns
-F = lu(M; factorize = bandedlu)      # banded LU of A, BEM for the border
-x = F \ rhs
+using BandedMatrices
+r, Ns, h, q = 24, 583, 4, 1                # 24 unknowns per slice, 583 slices, 8th-order FD, 1 extra unknown
+p = h*r + q; n = r*Ns + q - p
+# K: the N × N matrix, ordered slice by slice, extra unknowns last
+M = BorderedMatrix(BandedMatrix(K[1:n, 1:n]),          # A, banded
+                   Matrix(K[1:n, n+1:end]),            # B
+                   Matrix(transpose(K[n+1:end, 1:n])), # C
+                   Matrix(K[n+1:end, n+1:end]))        # D
+F = lu(M)
+z = F \ BorderedVector(f, g)
 ```
 
-If the unknowns are not ordered slice by slice with the extra ones last,
-permute $K$ first.
+Better still, assemble the blocks directly in this form, with $A$ as a
+`BandedMatrix`, so that nothing needs converting.
 
 ### Memory
-
-Writing $n = r(N_s - h)$ for the size of $A$ and $p = hr + q$ for the border:
 
 | part | numbers stored |
 |---|---|
 | banded LU of $A$ | $(2k_l + k_u + 1)\,n \approx 3(h+1)\,r\,n$ |
-| $W = A^{-\top}C$ and $V = A^{-1}B$ | $2\,p\,n$ |
-| $B$, $C$ (kept sparse if $K$ is sparse) | nonzeros only |
+| $W = A^{-\top}C$ and $V = A^{-1}B$ (BEM) | $2\,p\,n$ |
+| $B$, $C$, $D$ (part of the matrix) | $2\,p\,n + p^2$ |
 
-Both grow linearly with $N_s$, and there is no fill outside the band. For
-example, with $r = 24$, $h = 4$, $N_s = 583$ ($N \approx 14\,000$) this takes
-about 62 MB, against 96 MB for UMFPACK's sparse LU of the whole bordered
-matrix.
+Everything grows linearly with $N_s$, and there is no fill outside the band.
 
 ## Benchmark
 
@@ -246,70 +241,72 @@ stencil reaching $h$ slices on each side, and one dense border row and column
 ($q = 1$). Random blocks, made diagonally dominant. Three solvers:
 
 * **UMFPACK**: sparse LU of the whole $(rN_s + 1)\times(rN_s + 1)$ matrix, `lu(K)`;
-* **BEM**: `lu(BorderedMatrix(K, h*r + 1); factorize = bandedlu)`;
-* **BED**: the same with `alg = :BED`, which does not store $V = A^{-1}B$.
+* **BEM**: `lu(M)` with $A$ a `BandedMatrix` and the last $h$ slices and the
+  extra unknown as the border;
+* **BED**: the same with `alg = :BED`, which does not compute $V = A^{-1}B$.
 
 Times are the best of a few runs, on one core (`BLAS.set_num_threads(1)`) of an
-Intel Xeon at 2.8 GHz, Julia 1.11. "Factor" includes partitioning $K$ and, for
-BEM/BED, computing $W$ (and $V$) and the Schur complements; "solve" is one
-right-hand side. Memory is that of the factors: for UMFPACK
-$16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes (values and indices), for
-BEM/BED the band, $W$ (and $V$) and the sparse borders. The residual is
-$\lVert Kx - b\rVert / \lVert b\rVert$. Reproduce with
-`julia --project benchmark/cyclic.jl h`.
+Intel Xeon at 2.8 GHz, Julia 1.11, BandedMatrices.jl 1.14. "Factor" includes
+building the blocks from the sparse $K$ (including the conversion of $A$ to a
+`BandedMatrix`) and, for BEM/BED, computing $W$ (and $V$) and the Schur
+complements; "solve" is one right-hand side. Memory is that of the
+factorisation: for UMFPACK $16\,(\mathrm{nnz}(L) + \mathrm{nnz}(U))$ bytes
+(values and indices); for BEM/BED the banded LU of $A$ and $W$ (and $V$).
+The residual is $\lVert Kx - b\rVert / \lVert b\rVert$. Reproduce with
+`julia --project=benchmark benchmark/cyclic.jl h`.
 
 **$h = 1$** (e.g. second-order centred differences, or a one-step scheme between consecutive slices):
 
 | r | N_s | unknowns | factor (s): UMFPACK / BEM / BED | solve (ms): UMFPACK / BEM / BED | memory (MB): UMFPACK / BEM / BED | residual: UMFPACK / BEM / BED |
 |---:|---:|---:|:---:|:---:|:---:|:---:|
-| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.00 / 0.01 / 0.01 | 0.0 / 0.0 / 0.0 | 1e-15 / 1e-15 / 1e-15 |
-| 5 | 50 | 251 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.1 / 0.1 / 0.1 | 3e-16 / 3e-16 / 4e-16 |
-| 5 | 100 | 501 | 0.001 / 0.000 / 0.000 | 0.02 / 0.02 / 0.02 | 0.2 / 0.2 / 0.2 | 4e-15 / 4e-15 / 4e-15 |
+| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.00 / 0.01 / 0.00 | 0.0 / 0.0 / 0.0 | 1e-15 / 2e-15 / 2e-15 |
+| 5 | 50 | 251 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.1 / 0.1 / 0.1 | 3e-16 / 3e-16 / 3e-16 |
+| 5 | 100 | 501 | 0.001 / 0.000 / 0.000 | 0.02 / 0.03 / 0.02 | 0.2 / 0.2 / 0.1 | 4e-15 / 5e-15 / 4e-15 |
 | 10 | 20 | 201 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.2 / 0.1 / 0.1 | 6e-16 / 6e-16 / 6e-16 |
-| 10 | 50 | 501 | 0.002 / 0.001 / 0.000 | 0.03 / 0.02 / 0.02 | 0.4 / 0.3 / 0.3 | 6e-16 / 6e-16 / 9e-16 |
-| 10 | 100 | 1001 | 0.004 / 0.001 / 0.001 | 0.07 / 0.05 / 0.04 | 0.8 / 0.7 / 0.6 | 4e-16 / 4e-16 / 5e-16 |
-| 50 | 20 | 1001 | 0.015 / 0.016 / 0.008 | 0.22 / 0.18 / 0.13 | 3.8 / 3.2 / 2.8 | 9e-16 / 9e-16 / 1e-15 |
-| 50 | 50 | 2501 | 0.045 / 0.040 / 0.026 | 0.57 / 0.42 / 0.37 | 9.9 / 8.1 / 7.1 | 1e-14 / 2e-14 / 2e-14 |
-| 50 | 100 | 5001 | 0.117 / 0.100 / 0.063 | 1.93 / 1.78 / 1.47 | 20.0 / 16.2 / 14.1 | 9e-16 / 9e-16 / 9e-16 |
-| 100 | 20 | 2001 | 0.079 / 0.101 / 0.067 | 1.00 / 0.69 / 0.59 | 15.1 / 12.9 / 11.3 | 2e-15 / 1e-15 / 1e-15 |
-| 100 | 50 | 5001 | 0.217 / 0.315 / 0.152 | 3.55 / 3.70 / 2.58 | 39.3 / 32.2 / 28.2 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 100 | 10001 | 0.432 / 0.908 / 0.440 | 6.75 / 8.14 / 7.41 | 79.5 / 64.3 / 56.3 | 1e-15 / 1e-15 / 1e-15 |
+| 10 | 50 | 501 | 0.002 / 0.001 / 0.001 | 0.04 / 0.03 / 0.06 | 0.4 / 0.3 / 0.3 | 6e-16 / 6e-16 / 9e-16 |
+| 10 | 100 | 1001 | 0.004 / 0.002 / 0.001 | 0.07 / 0.06 / 0.05 | 0.8 / 0.6 / 0.6 | 4e-16 / 5e-16 / 4e-16 |
+| 50 | 20 | 1001 | 0.015 / 0.018 / 0.013 | 0.22 / 0.19 / 0.20 | 3.8 / 3.0 / 2.7 | 9e-16 / 9e-16 / 1e-15 |
+| 50 | 50 | 2501 | 0.045 / 0.046 / 0.026 | 0.70 / 0.52 / 0.43 | 9.9 / 7.9 / 6.9 | 1e-14 / 2e-14 / 2e-14 |
+| 50 | 100 | 5001 | 0.099 / 0.094 / 0.082 | 1.59 / 2.05 / 1.48 | 20.0 / 15.9 / 13.9 | 9e-16 / 9e-16 / 1e-15 |
+| 100 | 20 | 2001 | 0.108 / 0.108 / 0.067 | 2.35 / 1.06 / 0.70 | 15.1 / 12.2 / 10.6 | 2e-15 / 1e-15 / 1e-15 |
+| 100 | 50 | 5001 | 0.257 / 0.404 / 0.257 | 3.56 / 6.45 / 3.73 | 39.3 / 31.4 / 27.4 | 2e-15 / 2e-15 / 2e-15 |
+| 100 | 100 | 10001 | 0.451 / 1.079 / 0.498 | 8.90 / 9.13 / 9.94 | 79.5 / 63.4 / 55.4 | 1e-15 / 1e-15 / 1e-15 |
 
 **$h = 4$** (eighth-order centred differences):
 
 | r | N_s | unknowns | factor (s): UMFPACK / BEM / BED | solve (ms): UMFPACK / BEM / BED | memory (MB): UMFPACK / BEM / BED | residual: UMFPACK / BEM / BED |
 |---:|---:|---:|:---:|:---:|:---:|:---:|
-| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.01 / 0.01 / 0.01 | 0.1 / 0.1 / 0.1 | 7e-16 / 8e-16 / 7e-16 |
-| 5 | 50 | 251 | 0.001 / 0.001 / 0.000 | 0.02 / 0.02 / 0.01 | 0.3 / 0.2 / 0.2 | 2e-15 / 2e-15 / 2e-15 |
-| 5 | 100 | 501 | 0.002 / 0.001 / 0.001 | 0.04 / 0.03 / 0.02 | 0.7 / 0.5 / 0.4 | 5e-16 / 6e-16 / 5e-16 |
-| 10 | 20 | 201 | 0.001 / 0.001 / 0.001 | 0.03 / 0.02 / 0.01 | 0.4 / 0.4 / 0.3 | 2e-15 / 2e-15 / 2e-15 |
-| 10 | 50 | 501 | 0.004 / 0.003 / 0.002 | 0.07 / 0.04 / 0.04 | 1.3 / 0.9 / 0.8 | 1e-15 / 1e-15 / 1e-15 |
-| 10 | 100 | 1001 | 0.009 / 0.007 / 0.004 | 0.14 / 0.09 / 0.08 | 2.7 / 1.9 / 1.5 | 8e-16 / 7e-16 / 7e-16 |
-| 50 | 20 | 1001 | 0.067 / 0.092 / 0.050 | 0.67 / 0.45 / 0.33 | 10.8 / 9.0 / 7.7 | 2e-15 / 1e-15 / 1e-15 |
-| 50 | 50 | 2501 | 0.180 / 0.301 / 0.153 | 2.64 / 2.31 / 1.36 | 31.2 / 22.8 / 19.1 | 5e-15 / 5e-15 / 5e-15 |
-| 50 | 100 | 5001 | 0.360 / 0.668 / 0.314 | 5.32 / 4.19 / 3.47 | 65.4 / 45.9 / 38.2 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 20 | 2001 | 0.270 / 0.810 / 0.387 | 3.22 / 3.16 / 2.31 | 43.0 / 35.9 / 30.8 | 2e-15 / 2e-15 / 2e-15 |
-| 100 | 50 | 5001 | 0.890 / 3.447 / 1.798 | 10.10 / 12.39 / 7.79 | 124.7 / 91.2 / 76.4 | 9e-15 / 9e-15 / 9e-15 |
-| 100 | 100 | 10001 | 1.779 / 8.675 / 3.852 | 19.97 / 20.26 / 17.33 | 261.0 / 183.4 / 152.6 | 5e-15 / 5e-15 / 5e-15 |
+| 5 | 20 | 101 | 0.000 / 0.000 / 0.000 | 0.01 / 0.02 / 0.01 | 0.1 / 0.1 / 0.1 | 7e-16 / 8e-16 / 8e-16 |
+| 5 | 50 | 251 | 0.001 / 0.001 / 0.001 | 0.02 / 0.02 / 0.01 | 0.3 / 0.2 / 0.2 | 2e-15 / 2e-15 / 2e-15 |
+| 5 | 100 | 501 | 0.002 / 0.001 / 0.002 | 0.05 / 0.03 / 0.03 | 0.7 / 0.4 / 0.4 | 5e-16 / 5e-16 / 5e-16 |
+| 10 | 20 | 201 | 0.002 / 0.001 / 0.001 | 0.04 / 0.02 / 0.04 | 0.4 / 0.3 / 0.2 | 2e-15 / 2e-15 / 2e-15 |
+| 10 | 50 | 501 | 0.005 / 0.004 / 0.003 | 0.08 / 0.05 / 0.07 | 1.3 / 0.9 / 0.7 | 1e-15 / 1e-15 / 1e-15 |
+| 10 | 100 | 1001 | 0.010 / 0.008 / 0.006 | 0.14 / 0.14 / 0.11 | 2.7 / 1.8 / 1.5 | 8e-16 / 8e-16 / 7e-16 |
+| 50 | 20 | 1001 | 0.067 / 0.101 / 0.051 | 0.66 / 0.57 / 0.37 | 10.8 / 7.4 / 6.1 | 2e-15 / 1e-15 / 1e-15 |
+| 50 | 50 | 2501 | 0.180 / 0.286 / 0.147 | 2.73 / 2.90 / 1.82 | 31.2 / 21.2 / 17.5 | 5e-15 / 5e-15 / 5e-15 |
+| 50 | 100 | 5001 | 0.417 / 0.727 / 0.395 | 6.29 / 6.25 / 5.02 | 65.4 / 44.2 / 36.5 | 2e-15 / 2e-15 / 2e-15 |
+| 100 | 20 | 2001 | 0.291 / 0.645 / 0.304 | 3.27 / 4.05 / 2.26 | 43.0 / 29.5 / 24.3 | 2e-15 / 2e-15 / 2e-15 |
+| 100 | 50 | 5001 | 0.879 / 3.841 / 2.010 | 11.09 / 12.36 / 8.78 | 124.7 / 84.7 / 69.9 | 9e-15 / 9e-15 / 9e-15 |
+| 100 | 100 | 10001 | 1.876 / 9.043 / 4.401 | 25.25 / 25.87 / 18.78 | 261.0 / 176.7 / 145.9 | 5e-15 / 5e-15 / 5e-15 |
 
 What the numbers say:
 
-* **Memory**: the banded factorisation always takes less: by 20–30% with BEM,
-  by 30–40% with BED.
+* **Memory**: the factorisation takes less than UMFPACK's, by 20–35% with BEM
+  and by 30–45% with BED.
 * **Solves** (what a preconditioner repeats at every Krylov iteration) are
-  mostly faster, up to about 2× with BED; for the largest case with $h = 1$
-  ($r = N_s = 100$) they are 10–20% slower.
+  comparable to UMFPACK's, within a factor of about 2 either way (these are
+  short, noisy timings); BED is mostly faster.
 * **Factorisation** is as fast or faster for small blocks, but slower than
-  UMFPACK for large blocks, especially with a wide stencil (up to ~5× for
-  $r = 100$, $h = 4$; ~2× for $r = 100$, $h = 1$ with BEM). There
-  the cost is not the banded LU itself (0.45 s for $r = N_s = 100$, $h = 4$)
-  but the $2(hr + 1)$ solves with $A$ needed for $W$ and $V$ (about 3.7 s each
-  for 401 right-hand sides, since LAPACK's `gbtrs` works one right-hand side at
-  a time). BED halves this cost.
+  UMFPACK for large blocks, especially with a wide stencil: up to ~5× with BEM
+  and ~2.3× with BED for $r = 100$, $h = 4$. The banded LU itself is cheap; the
+  cost is in the $p$ solves with $A^\top$ for $W$ and, for BEM, the $p$ solves
+  with $A$ for $V$, with $p = hr + 1$ right-hand sides each.
 * Accuracy is the same for all three.
 
 ## Tests
 
 ```
-julia --project test/runtests.jl
+julia --project -e 'using Pkg; Pkg.test()'
 ```
+
+The tests use BandedMatrices.jl, SparseArrays and Random (test dependencies only).

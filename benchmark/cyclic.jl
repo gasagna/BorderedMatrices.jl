@@ -1,15 +1,24 @@
 # Benchmark: cyclic block-banded matrices with one dense border row and column, solved
 #   (a) with UMFPACK's sparse LU of the whole matrix, and
-#   (b) as a banded matrix bordered by its last h slices and the extra unknown (bandedlu + BEM),
-#   (c) the same with plain block elimination (bandedlu + BED).
+#   (b) as a banded matrix bordered by its last h slices and the extra unknown, with the banded
+#       LU of BandedMatrices.jl for the interior and BEM for the border,
+#   (c) the same with plain block elimination (BED).
 # Ns slices of r unknowns; each slice couples to the h slices on each side (periodically).
 #
-#     julia --project benchmark/cyclic.jl [h]
+#     julia --project=benchmark benchmark/cyclic.jl [h]
 #
 # Prints a markdown table: factorisation time, time of one solve, memory of the factors,
 # relative residual.
 
-using BorderedMatrices, LinearAlgebra, SparseArrays, Random, Printf
+using BorderedMatrices, BandedMatrices, LinearAlgebra, SparseArrays, Random, Printf
+
+bandedlu(A) = lu(BandedMatrix(A))     # the conversion from sparse is included in the timings
+
+# the bordered matrix of K: interior slices in A (banded), the last p unknowns as the border
+function bordered(K, p)
+    N = size(K, 1); n = N - p
+    return BorderedMatrix(K[1:n, 1:n], Matrix(K[1:n, n+1:N]), Matrix(transpose(K[n+1:N, 1:n])), Matrix(K[n+1:N, n+1:N]))
+end
 
 BLAS.set_num_threads(1)
 
@@ -51,18 +60,19 @@ for r in (5, 10, 50, 100), Ns in (20, 50, 100)
     xu  = Fu \ b
     mu  = 16 * (nnz(Fu.L) + nnz(Fu.U)) / 1e6           # values + row indices
     # (b) banded interior + border of the last h slices and the extra unknown
-    M   = BorderedMatrix(K, h * r + 1)
+    M   = bordered(K, h * r + 1)
+    rb  = BorderedVector(b[1:N-h*r-1], b[N-h*r:N])
     Fb  = lu(M; factorize = bandedlu)
-    tfb = best(() -> lu(BorderedMatrix(K, h * r + 1); factorize = bandedlu), k)
-    tsb = best(() -> Fb \ b, 5)
-    xb  = Fb \ b
-    mb  = (sizeof(Fb.A.AB) + sizeof(Fb.W) + sizeof(Fb.V) + Base.summarysize(Fb.B) + Base.summarysize(Fb.C)) / 1e6
+    tfb = best(() -> lu(bordered(K, h * r + 1); factorize = bandedlu), k)
+    tsb = best(() -> Fb \ rb, 5)
+    xb  = collect(Fb \ rb)
+    mb  = (Base.summarysize(Fb.A) + sizeof(Fb.W) + sizeof(Fb.V)) / 1e6       # B, C, D belong to M
     # (c) the same with plain block elimination (no V = A⁻¹B)
     Fd  = lu(M; alg = :BED, factorize = bandedlu)
-    tfd = best(() -> lu(BorderedMatrix(K, h * r + 1); alg = :BED, factorize = bandedlu), k)
-    tsd = best(() -> Fd \ b, 5)
-    xd  = Fd \ b
-    md  = (sizeof(Fd.A.AB) + sizeof(Fd.W) + Base.summarysize(Fd.B) + Base.summarysize(Fd.C)) / 1e6
+    tfd = best(() -> lu(bordered(K, h * r + 1); alg = :BED, factorize = bandedlu), k)
+    tsd = best(() -> Fd \ rb, 5)
+    xd  = collect(Fd \ rb)
+    md  = (Base.summarysize(Fd.A) + sizeof(Fd.W)) / 1e6
     res(x) = norm(K * x - b) / norm(b)
     @printf "| %d | %d | %d | %.3f / %.3f / %.3f | %.2f / %.2f / %.2f | %.1f / %.1f / %.1f | %.0e / %.0e / %.0e |\n" r Ns N tfu tfb tfd 1e3tsu 1e3tsb 1e3tsd mu mb md res(xu) res(xb) res(xd)
     flush(stdout)

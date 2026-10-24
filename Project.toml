@@ -5,16 +5,16 @@ version = "0.2.0"
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
 julia = "1.10"
 LinearAlgebra = "1"
-SparseArrays = "1"
 
 [extras]
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfdfc78-ad2d-5f8d-a7d4-87d36a4a52c6"
 
 [targets]
-test = ["Test", "Random"]
+test = ["BandedMatrices", "Random", "SparseArrays", "Test"]
