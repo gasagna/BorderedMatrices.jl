@@ -9,13 +9,12 @@ using BorderedMatrices, LinearAlgebra, SparseArrays, Random
 include(joinpath(@__DIR__, "matrices.jl"))
 
 r, Ns, h = 4, 24, 2
-K = cyclic_matrix(r, Ns, h; rng = MersenneTwister(1))
+f, b, c, d, K = cyclic_problem(r, Ns, h; rng = MersenneTwister(1))
 N = size(K, 1); p = h*r + 1; n = N - p
 
 F = lu(K)                                   # UMFPACK, with its own row and column ordering
 LU = F.L + F.U                              # pattern of the factors, in UMFPACK's ordering
-kb = (h + 1)*r - 1
-Fb = lu(BorderedMatrix(K[1:n, 1:n], K[1:n, n+1:N], sparse(transpose(K[n+1:N, 1:n])), Matrix(K[n+1:N, n+1:N])); factorize = A -> bandedlu(A, kb, kb))
+Fb = lu(blockcyclic(f, r, Ns, h, b, c, d))
 kl, ku = Fb.A.kl, Fb.A.kl + Fb.A.ku          # bandwidths of the banded factors (ku grows by kl)
 
 open(joinpath(@__DIR__, "sparsity.txt"), "w") do io

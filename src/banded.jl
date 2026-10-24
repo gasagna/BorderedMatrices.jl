@@ -1,4 +1,5 @@
-# Banded LU factorisation: LAPACK's gbtrf, with solves by blocks for many right-hand sides.
+# Banded matrices and their LU factorisation (LAPACK's gbtrf), with solves by blocks for many
+# right-hand sides.
 #
 # The factors are in LAPACK band storage, AB of size (2kl + ku + 1) × n, with kv = kl + ku:
 #   A[i, j]  = AB[kv + 1 + i - j, j] on input, for j - ku ≤ i ≤ j + kl;
@@ -16,9 +17,40 @@ const NB = 64       # block size: 32–128 perform alike
 const KLMIN = 48    # below this lower bandwidth gbtrs is as fast or faster
 
 """
+    BandedMatrix{T}(n, kl, ku)
+
+An `n × n` matrix with `kl` sub- and `ku` super-diagonals, zero-initialised, in
+LAPACK band storage: `A[i, j]` is `AB[kl + ku + 1 + i - j, j]`, with `kl` more
+rows reserved for the fill of the LU factorisation. Entries outside the band
+are zero and cannot be set to anything else.
+"""
+struct BandedMatrix{T} <: AbstractMatrix{T}
+    AB::Matrix{T}       # (2kl + ku + 1) × n
+    kl::Int
+    ku::Int
+    BandedMatrix{T}(n::Int, kl::Int, ku::Int) where {T} = new{T}(zeros(T, 2kl + ku + 1, n), kl, ku)
+end
+
+Base.size(A::BandedMatrix) = (size(A.AB, 2), size(A.AB, 2))
+_inband(A, i, j) = -A.ku <= i - j <= A.kl
+Base.getindex(A::BandedMatrix{T}, i::Int, j::Int) where {T} =
+    (checkbounds(A, i, j); _inband(A, i, j) ? A.AB[A.kl + A.ku + 1 + i - j, j] : zero(T))
+function Base.setindex!(A::BandedMatrix, v, i::Int, j::Int)
+    checkbounds(A, i, j)
+    if _inband(A, i, j)
+        A.AB[A.kl + A.ku + 1 + i - j, j] = v
+    elseif !iszero(v)
+        throw(ArgumentError("entry ($i, $j) is outside the band"))
+    end
+    return v
+end
+Base.copy(A::BandedMatrix{T}) where {T} = (B = BandedMatrix{T}(size(A, 1), A.kl, A.ku); copyto!(B.AB, A.AB); B)
+
+"""
     BandedLU
 
-LU factorisation with partial pivoting of a banded matrix, from `bandedlu`.
+LU factorisation with partial pivoting of a `BandedMatrix` (LAPACK `gbtrf`), from
+`lu` or `lu!`. `ldiv!` and `\\` solve with the matrix and with its transpose.
 """
 struct BandedLU{T} <: Factorization{T}
     AB::Matrix{T}
@@ -28,32 +60,14 @@ struct BandedLU{T} <: Factorization{T}
 end
 
 """
-    bandedlu(A, kl, ku)
+    lu!(A::BandedMatrix)
 
-LU factorisation with partial pivoting (LAPACK `gbtrf`) of the square matrix `A`,
-of any type, with `kl` sub- and `ku` super-diagonals. Entries outside the band are
-ignored. The factors take `(2kl + ku + 1) × n` numbers. `ldiv!` and `\\` solve
-with the matrix and with its transpose, `transpose(F)`.
+Factorise `A` in place: its storage is overwritten by the factors, with no copy.
+`lu(A)` factorises a copy.
 """
-function bandedlu(A::AbstractMatrix{T}, kl::Int, ku::Int) where {T}
-    n = size(A, 1)
-    AB = zeros(T, 2kl + ku + 1, n)
-    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
-        AB[kl + ku + 1 + i - j, j] = A[i, j]
-    end
-    return bandedlu!(AB, kl, ku)
-end
-
-"""
-    bandedlu!(AB, kl, ku)
-
-As `bandedlu`, for a matrix already in LAPACK band storage: `AB` is
-`(2kl + ku + 1) × n`, with `A[i, j]` in `AB[kl + ku + 1 + i - j, j]` and the first
-`kl` rows free. `AB` is overwritten with the factors. Assembling `A` in this form
-avoids any conversion.
-"""
-bandedlu!(AB::Matrix{T}, kl::Int, ku::Int) where {T} =
-    BandedLU{T}(LAPACK.gbtrf!(kl, ku, size(AB, 2), AB)..., kl, ku)
+LinearAlgebra.lu!(A::BandedMatrix{T}) where {T} =
+    BandedLU{T}(LAPACK.gbtrf!(A.kl, A.ku, size(A, 1), A.AB)..., A.kl, A.ku)
+LinearAlgebra.lu(A::BandedMatrix) = lu!(copy(A))
 
 Base.size(F::BandedLU) = (size(F.AB, 2), size(F.AB, 2))
 

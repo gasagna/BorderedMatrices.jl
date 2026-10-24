@@ -23,9 +23,8 @@ abstract type BorderedMatrixLU{T} <: Factorization{T} end
 """
     lu(M::BorderedMatrix; alg = :BEM, factorize = lu)
 
-Factorise `M`. `factorize` is applied to `A`: `lu` for a dense or sparse `A`,
-`lu!` to factorise a dense `A` in place, `A -> bandedlu(A, kl, ku)` for a banded
-`A`. `alg` is `:BEM`, the mixed block elimination of Govaerts and Pryce, stable
+Factorise `M`. `factorize` is applied to `A`: `lu` for a dense, sparse or
+`BandedMatrix` `A`, or `lu!` to factorise `A` in place. `alg` is `:BEM`, the mixed block elimination of Govaerts and Pryce, stable
 when `A` is nearly singular, or `:BED`, the plain block elimination, which is
 inaccurate when `A` is ill-conditioned but does not store `A⁻¹B`.
 """

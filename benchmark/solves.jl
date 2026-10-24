@@ -1,4 +1,4 @@
-# Speed-up of the blocked banded solves of bandedlu over LAPACK's gbtrs, for the p = h r + 1 right-hand sides that the factorisation of a
+# Speed-up of the blocked banded solves of BandedLU over LAPACK's gbtrs, for the p = h r + 1 right-hand sides that the factorisation of a
 # cyclic block-banded bordered matrix needs (W = A⁻ᵀC and V = A⁻¹B). N_s = 100 slices.
 #
 #     julia --project=benchmark benchmark/solves.jl      (writes benchmark/results_solves.csv)
@@ -13,11 +13,11 @@ Ns = 100
 out = open(joinpath(@__DIR__, "results_solves.csv"), "w")
 println(out, "r,h,Ns,n,p,kl,ku,gbtrs,gbtrs_T,blocked,blocked_T")
 for h in (1, 2, 4), r in (5, 10, 20, 50, 100, 200)
-    K = cyclic_matrix(r, Ns, h; rng = MersenneTwister(0))
-    N = size(K, 1); p = h*r + 1; n = N - p
-    kb = (h + 1)*r - 1
-    F = bandedlu(K[1:n, 1:n], kb, kb)
-    kl, ku = kb, kb
+    f, b, c, d, _ = cyclic_problem(r, Ns, h; rng = MersenneTwister(0))
+    M = blockcyclic(f, r, Ns, h, b, c, d)
+    F = lu(M.A)
+    n, p = size(M.A, 1), size(M.D, 1)
+    kl, ku = F.kl, F.ku
     X = randn(n, p)
     k = r <= 50 ? 5 : 2
     t  = best(() -> LAPACK.gbtrs!('N', kl, ku, n, F.AB, F.ipiv, copy(X)), k)

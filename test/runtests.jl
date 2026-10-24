@@ -11,7 +11,13 @@ function system(mkA, T, n, p; sparseborders = false)
 end
 dense(T, n)   = rand(T, n, n) + n*I
 sparse_(T, n) = sprand(T, n, n, 0.2) + n*I
-banded(T, n)  = spdiagm(-2 => rand(T, n-2), 0 => rand(T, n) .+ 10, 3 => rand(T, n-3))   # factorised by bandedlu
+function banded(T, n)
+    A = BandedMatrix{T}(n, 2, 3)
+    for j in 1:n, i in max(1, j - 3):min(n, j + 2)
+        A[i, j] = rand(T) + (i == j ? 10 : 0)
+    end
+    return A
+end
 
 @testset "BorderedVector" begin
     v = BorderedVector([1.0, 2, 3], [4.0, 5])
@@ -42,7 +48,7 @@ end
         sparseborders in (false, true)
         M, r = system(mkA, T, 40, p; sparseborders)
         z = Matrix(M) \ collect(r)
-        F = lu(M; alg = alg, factorize = mkA === banded ? (A -> bandedlu(A, 2, 3)) : lu)
+        F = lu(M; alg = alg)
         @test F \ r ≈ z
         @test F \ r ≈ z                                       # a solve does not modify F
         s = copy(r); ldiv!(F, s)
@@ -65,30 +71,28 @@ end
     @test !(lu(M; alg = :BED) \ r ≈ z)
 end
 
-@testset "cyclic block-banded matrix: banded A, last slices in the border" begin
-    # Ns slices of r unknowns, coupled to h slices on each side (periodically), plus one
-    # extra unknown with a dense row and column
+@testset "blockcyclic" begin
+    # Ns slices of r unknowns, coupled to h slices on each side (periodically), plus q
+    # extra unknowns with dense rows and columns
     Random.seed!(3)
-    r, Ns, h = 3, 20, 2
-    N = r*Ns + 1
-    K = zeros(N, N)
-    for l in 1:Ns, j in -h:h
-        m = mod(l - 1 + j, Ns) + 1
-        K[(l-1)*r+1:l*r, (m-1)*r+1:m*r] = rand(r, r) + (j == 0 ? 4r*I : 0I)
+    for T in (Float64, ComplexF64), (r, Ns, h, q) in ((3, 20, 2, 1), (1, 7, 3, 2), (4, 9, 1, 1))
+        blocks = Dict((l, mod(l - 1 + j, Ns) + 1) => rand(T, r, r) + (j == 0 ? 4r*I : 0I) for l in 1:Ns, j in -h:h)
+        b, c, d = rand(T, r*Ns, q), rand(T, r*Ns, q), rand(T, q, q)
+        K = zeros(T, r*Ns + q, r*Ns + q)
+        for ((l, k), F) in blocks
+            K[(l-1)*r+1:l*r, (k-1)*r+1:k*r] = F
+        end
+        K[1:r*Ns, r*Ns+1:end] = b; K[r*Ns+1:end, 1:r*Ns] = transpose(c); K[r*Ns+1:end, r*Ns+1:end] = d
+        M = blockcyclic((l, k) -> blocks[(l, k)], r, Ns, h, b, c, d)
+        @test M isa BorderedMatrix{T, BandedMatrix{T}}
+        @test Matrix(M) == K                                 # same matrix, same ordering
+        @test M.A.kl == M.A.ku == (h + 1)*r - 1
+        x = rand(T, r*Ns + q); n = size(M.A, 1)
+        for alg in (:BEM, :BED)
+            @test collect(lu(M; alg = alg) \ BorderedVector(x[1:n], x[n+1:end])) ≈ K \ x
+        end
     end
-    K[1:N-1, N] = rand(N - 1); K[N, 1:N-1] = rand(N - 1)
-    # border: the last h slices and the extra unknown
-    n = N - (h*r + 1)
-    Ks = sparse(K)                                           # sparse borders: mostly zero
-    M = BorderedMatrix(Ks[1:n, 1:n], Ks[1:n, n+1:N], sparse(transpose(Ks[n+1:N, 1:n])), K[n+1:N, n+1:N])
-    @test Matrix(M) == K
-    kb = (h + 1)*r - 1                                       # the wrap-around is in the border:
-    @test all(abs(i - j) <= kb for (i, j) in zip(findnz(M.A)[1:2]...))   # A is banded
-    b = rand(N)
-    for alg in (:BEM, :BED)
-        z = lu(M; alg = alg, factorize = A -> bandedlu(A, kb, kb)) \ BorderedVector(b[1:n], b[n+1:N])
-        @test z ≈ K \ b
-    end
+    @test_throws ArgumentError blockcyclic((l, k) -> ones(1, 1), 1, 4, 2, ones(4, 1), ones(4, 1), ones(1, 1))
 end
 
 allocs(F, s) = @allocated ldiv!(F, s)
@@ -96,19 +100,23 @@ allocs(F, s) = @allocated ldiv!(F, s)
 @testset "solves do not allocate" begin
     for mkA in (dense, banded), alg in (:BEM, :BED), sparseborders in (false, true)
         M, r = system(mkA, Float64, 50, 3; sparseborders)
-        F = lu(M; alg = alg, factorize = mkA === banded ? (A -> bandedlu(A, 2, 3)) : lu)
+        F = lu(M; alg = alg)
         allocs(F, copy(r))                           # compile
         @test allocs(F, copy(r)) == 0
     end
 end
 
-@testset "bandedlu" begin
+@testset "BandedMatrix and its LU" begin
     Random.seed!(6)
     for T in (Float64, ComplexF64), n in (1, 5, 63, 64, 65, 300), (kl, ku) in ((0, 0), (1, 0), (0, 2), (3, 2), (17, 40), (70, 70)),
         m in (0, 1, 7)
         # a banded matrix, not diagonally dominant: rows are interchanged
-        A = [i - j <= kl && j - i <= ku ? rand(T) : zero(T) for i in 1:n, j in 1:n]
-        F = bandedlu(A, kl, ku)
+        A = BandedMatrix{T}(n, kl, ku)
+        for j in 1:n, i in max(1, j - ku):min(n, j + kl)
+            A[i, j] = rand(T)
+        end
+        @test A == [i - j <= kl && j - i <= ku ? A[i, j] : zero(T) for i in 1:n, j in 1:n]
+        F = lu(A)
         X = m == 0 ? rand(T, n) : rand(T, n, m)              # m = 0: a vector (gbtrs)
         @test F \ X ≈ A \ X
         @test transpose(F) \ X ≈ transpose(A) \ X
@@ -121,13 +129,22 @@ end
             @test Y ≈ LAPACK.gbtrs!('T', kl, ku, n, F.AB, F.ipiv, copy(X))
         end
     end
-    A = rand(ComplexF64, 6, 6) + 6I; F = bandedlu(A, 5, 5); b = rand(ComplexF64, 6)
-    @test adjoint(F) \ b ≈ adjoint(A) \ b
-    # A given directly in band storage
-    A = [i - j <= 2 && j - i <= 1 ? rand() + 4(i == j) : 0.0 for i in 1:20, j in 1:20]
-    AB = zeros(2*2 + 1 + 1, 20)
-    for j in 1:20, i in max(1, j - 1):min(20, j + 2)
-        AB[2 + 1 + 1 + i - j, j] = A[i, j]
+    A = BandedMatrix{ComplexF64}(6, 5, 5); A .= rand(ComplexF64, 6, 6) + 6I
+    F = lu(A); b = rand(ComplexF64, 6)
+    @test adjoint(F) \ b ≈ adjoint(Matrix(A)) \ b
+    # entries outside the band: zero, and only zero can be stored there
+    A = BandedMatrix{Float64}(5, 1, 2)
+    @test A[5, 1] == 0
+    A[5, 1] = 0
+    @test_throws ArgumentError A[5, 1] = 1
+    @test_throws BoundsError A[6, 1]
+    # lu! works in place, lu on a copy
+    for i in 1:5
+        A[i, i] = i + 1
     end
-    @test bandedlu!(AB, 2, 1) \ ones(20) ≈ A \ ones(20)
+    A[1, 2] = 1; A[2, 1] = 1
+    B = copy(A); lu(A)
+    @test A == B
+    lu!(A)
+    @test A.AB != B.AB                                       # overwritten by the factors
 end
