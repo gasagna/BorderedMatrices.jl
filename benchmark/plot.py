@@ -6,6 +6,7 @@ import csv, os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
@@ -63,13 +64,27 @@ fig.suptitle("Memory: cyclic block-banded matrix, Nₛ slices of r unknowns", fo
 legend(fig); fig.tight_layout(rect=(0, 0.05, 1, 1))
 fig.savefig(os.path.join(D, "memory.svg"), bbox_inches="tight"); save_preview(fig, "memory"); plt.close(fig)
 
-# time
-fig, axs = plt.subplots(2, 2, figsize=(9.6, 7.4), sharex=True)
+# time, relative to UMFPACK
+def ratio_panel(ax, rows, key, title):
+    for r in RCOL:
+        R = sorted((x for x in rows if x["r"] == r), key=lambda x: x["N"])
+        for s_ in ("bem", "bed"):
+            lab, m, ls = SOLV[s_]
+            ax.plot([x["N"] for x in R], [x[f"{key}_{s_}"] / x[f"{key}_umfpack"] for x in R], ls=ls, marker=m,
+                    ms=4, lw=1.4, color=RCOL[r])
+    ax.axhline(1, color="#8a93a3", lw=1)
+    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_ylim(0.15, 4)
+    ax.set_yticks([0.25, 0.5, 1, 2, 4]); ax.set_yticklabels(["0.25", "0.5", "1", "2", "4"])
+    ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    ax.set_xlabel("unknowns  N = r·Nₛ + 1"); ax.set_title(title, fontsize=9, color=INK)
+
+fig, axs = plt.subplots(2, 2, figsize=(10.5, 7.4), sharey=True)
 for j, h in enumerate((1, 4)):
-    panel(axs[0, j], rows[h], "factor", 1.0, "factorisation (s)", f"h = {h}: factorisation")
-    panel(axs[1, j], rows[h], "solve", 1e3, "one solve (ms)", f"h = {h}: one solve")
-fig.suptitle("Time on one core", fontsize=10, color=INK)
-legend(fig); fig.tight_layout(rect=(0, 0.06, 1, 1))
+    ratio_panel(axs[0, j], rows[h], "factor", f"h = {h}: factorisation time / UMFPACK's")
+    ratio_panel(axs[1, j], rows[h], "solve", f"h = {h}: time of one solve / UMFPACK's")
+axs[0, 0].set_ylabel("ratio (below 1: faster)"); axs[1, 0].set_ylabel("ratio (below 1: faster)")
+fig.suptitle("Time relative to UMFPACK, one core", fontsize=10, color=INK)
+legend(fig); fig.tight_layout(rect=(0, 0.05, 1, 1))
 fig.savefig(os.path.join(D, "time.svg"), bbox_inches="tight"); save_preview(fig, "time"); plt.close(fig)
 
 # sparsity patterns

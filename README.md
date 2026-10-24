@@ -316,7 +316,7 @@ residual, $\lVert Kx - b\rVert/\lVert b\rVert \approx 10^{-15}$.
 
 ![Memory of the factorisation against the number of unknowns, and ratio to UMFPACK](benchmark/memory.svg)
 
-![Factorisation and solve times against the number of unknowns](benchmark/time.svg)
+![Factorisation and solve times relative to UMFPACK](benchmark/time.svg)
 
 What the figures show:
 
@@ -325,17 +325,16 @@ What the figures show:
   0.56 for BED, for every $r$ and $N_s$; with $h = 1$ about 0.75–0.8 and
   0.63–0.7, rising towards 0.95 for the largest $N_s$, where UMFPACK's memory
   grows a little more slowly than linearly.
-* **One solve** takes about as long as with UMFPACK: with $h = 4$ mostly
-  10–50% less; with $h = 1$ anything from about 2× faster to 1.5× slower (these
-  are short timings, and noisy).
-* **Factorisation** is faster for small blocks but slower for large ones: for
-  $r = 200$, $h = 4$ about 6× (BEM) and 3× (BED) the time of UMFPACK; for
-  $r = 200$, $h = 1$ about 2.5× and 1.3×. The banded LU of $A$ is not the
-  problem: it runs at about 35 GFlop/s. The cost is in the $p = hr + 1$ solves
-  with $A^\top$ for $W$ and, for BEM, the $p$ solves with $A$ for $V$: LAPACK's
-  banded solve (`gbtrs`) treats one right-hand side at a time and runs at about
-  2.5 GFlop/s here (for $r = N_s = 100$, $h = 4$), against about 59 GFlop/s for
-  a dense matrix product on the same core.
+* **Factorisation** is faster than UMFPACK's in almost every case: with $h = 1$
+  by a factor of about 1.4–5, with $h = 4$ by up to about 2.5 (BEM) and 3 (BED).
+  The exceptions are the widest bands with few slices ($r = 100$, $N_s = 20$
+  and $r = 200$, $N_s \le 50$, with $h = 4$), where BEM takes up to 1.6 times as
+  long. This relies on the blocked solves for $W$ and $V$ described above; with
+  LAPACK's `gbtrs` the factorisation was up to 6 times slower than UMFPACK's for
+  large blocks.
+* **One solve** takes about as long as with UMFPACK: with $h = 4$ 5–60% less;
+  with $h = 1$ mostly less, up to 20% more for the largest cases (short,
+  noisy timings).
 
 In the small example of the sparsity figure the bordered factorisation stores
 more numbers than UMFPACK, because there the dense $W$ and $V$ ($p/n \approx 0.1$)
