@@ -338,7 +338,22 @@ $\lVert Kx - b\rVert/\lVert b\rVert \approx 10^{-15}$.
 
 ![Factorisation and solve times relative to UMFPACK](benchmark/time.svg)
 
-SUMMARY
+What the figures show (for $N \ge 1000$):
+
+* **Memory** grows linearly with the number of unknowns for all three. The
+  bordered factorisation takes less than UMFPACK's: with $h = 4$ about 0.67 of
+  it for BEM and 0.55 for BED, for every $r$ and $N_s$; with $h = 1$ 0.73–0.97
+  and 0.63–0.84, the ratio rising for the largest $N_s$, where UMFPACK's memory
+  grows a little more slowly than linearly.
+* **Factorisation** is faster than UMFPACK's in every case: with $h = 1$ by a
+  factor of 1.8–5.5 (BEM) and 2–9 (BED), with $h = 4$ by 1.5–3.7 (BEM) and 2.4–6
+  (BED). This relies on the blocked solves for $W$ and $V$: with LAPACK's `gbtrs`
+  alone the factorisation was up to 6 times slower than UMFPACK's for large
+  blocks.
+* **One solve** takes about as long as with UMFPACK, between 0.4 and 1.4 times
+  as long for BEM, 0.35–1.15 for BED (short, noisy timings).
+* **The matrix itself**, with dense $B$ and $C$ from `blockcyclic`, takes about
+  1.2–1.3 times the memory of the sparse $K$ (values and indices).
 
 ## Reproducing the figures
 

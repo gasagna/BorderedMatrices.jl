@@ -73,8 +73,8 @@ def ratio_panel(ax, rows, key, title):
             ax.plot([x["N"] for x in R], [x[f"{key}_{s_}"] / x[f"{key}_umfpack"] for x in R], ls=ls, marker=m,
                     ms=4, lw=1.4, color=RCOL[r])
     ax.axhline(1, color="#8a93a3", lw=1)
-    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_ylim(0.15, 4)
-    ax.set_yticks([0.25, 0.5, 1, 2, 4]); ax.set_yticklabels(["0.25", "0.5", "1", "2", "4"])
+    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_ylim(0.08, 4)
+    ax.set_yticks([0.125, 0.25, 0.5, 1, 2, 4]); ax.set_yticklabels(["0.125", "0.25", "0.5", "1", "2", "4"])
     ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.set_xlabel("unknowns  N = r·Nₛ + 1"); ax.set_title(title, fontsize=9, color=INK)
 
