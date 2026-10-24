@@ -10,7 +10,7 @@ Bordered linear systems
     |       | |   | = |   |
     \\ Cᵀ  D / \\ y /   \\ g /
 
-with `A` an `n × n` matrix of any type that can be factorised, and borders
+with `A` an `n × n` matrix, real or complex, of any type that can be factorised, and borders
 `B`, `C` of size `n × p` (or vectors, `p = 1`) and `D` of size `p × p` (or a
 scalar). The factorisation of `A` is reused: the bordered system is solved by
 block elimination, with the mixed method of Govaerts and Pryce (`:BEM`), stable
@@ -47,13 +47,24 @@ _nb(g::Number) = 1
 A vector `x` (length `n`) followed by a border `y`: a scalar or a vector of
 length `p`.
 """
+_bvtype(::Type{T}, ::Type{S}) where {T, S} = (T <: Real && S <: Complex) ? promote_type(T, S) : T
+
 mutable struct BorderedVector{T<:Number, V<:AbstractVector{T}, Y} <: AbstractVector{T}
     _1::V # main part
     _2::Y # border: a scalar of type T, or a vector with eltype T
-    BorderedVector(v₁::V, v₂::Number) where {T, V<:AbstractVector{T}} =
-        new{T, V, T}(v₁, convert(T, v₂))
-    BorderedVector(v₁::V, v₂::AbstractVector) where {T, V<:AbstractVector{T}} =
-        (w = convert(Vector{T}, v₂); new{T, V, Vector{T}}(v₁, w))
+    # The element type is that of the main part, which is not copied, and the border is
+    # converted to it. Only a real main part with a complex border is promoted to complex
+    # (and then the main part is copied).
+    function BorderedVector(v₁::AbstractVector, v₂::Number)
+        T = _bvtype(eltype(v₁), typeof(v₂))
+        w = convert(AbstractVector{T}, v₁)
+        return new{T, typeof(w), T}(w, convert(T, v₂))
+    end
+    function BorderedVector(v₁::AbstractVector, v₂::AbstractVector)
+        T = _bvtype(eltype(v₁), eltype(v₂))
+        w = convert(AbstractVector{T}, v₁)
+        return new{T, typeof(w), Vector{T}}(w, convert(Vector{T}, v₂))
+    end
 end
 
 """
@@ -95,7 +106,12 @@ Base.similar(v::BorderedVector) =
 
 The matrix `[A B; Cᵀ D]`. `A` is `n × n`; `B` and `C` are vectors of length `n`
 (a single border) or `n × p` matrices; `D` is a scalar or a `p × p` matrix.
-Note that `C` is stored as a column (block): the bottom row (block) is `Cᵀ`.
+Note that `C` is stored as a column (block): the bottom row (block) is `Cᵀ`,
+the *transpose* of `C`, also for complex matrices (not the conjugate transpose
+`Cᴴ`; pass `conj(C)` for that).
+
+Real and complex element types can be mixed: they are promoted to a common
+type (a real matrix with a complex border becomes complex).
 
     BorderedMatrix(K, p)
 
@@ -108,6 +124,11 @@ mutable struct BorderedMatrix{T<:Number, M<:AbstractMatrix{T}, V<:AbstractVecOrM
     _21::V # bottom border, stored transposed: vector or n × p
     _22::S # bottom right: scalar or p × p
     function BorderedMatrix(M₁₁::M, M₁₂::V, M₂₁::V, M₂₂::Union{Number, AbstractMatrix}) where {T, M<:AbstractMatrix{T}, V<:AbstractVecOrMat{T}}
+        # a complex corner with a real matrix: promote everything to complex
+        S = _bvtype(T, eltype(M₂₂))
+        S === T || return BorderedMatrix(convert(AbstractMatrix{S}, M₁₁), convert(AbstractArray{S}, M₁₂),
+                                         convert(AbstractArray{S}, M₂₁),
+                                         M₂₂ isa Number ? convert(S, M₂₂) : convert(AbstractMatrix{S}, M₂₂))
         n = size(M₁₁, 1)
         size(M₁₁, 2) == n || throw(DimensionMismatch("top left block must be square"))
         p = _nb(M₁₂)
@@ -122,6 +143,23 @@ mutable struct BorderedMatrix{T<:Number, M<:AbstractMatrix{T}, V<:AbstractVecOrM
             return new{T, M, V, Matrix{T}}(M₁₁, M₁₂, M₂₁, D)
         end
     end
+end
+
+# mixed element types (e.g. a real A with a complex border) or border types: promote
+function BorderedMatrix(M₁₁::AbstractMatrix, M₁₂::AbstractVecOrMat, M₂₁::AbstractVecOrMat, M₂₂::Union{Number, AbstractMatrix})
+    T = promote_type(eltype(M₁₁), eltype(M₁₂), eltype(M₂₁), eltype(M₂₂))
+    A = convert(AbstractMatrix{T}, M₁₁)
+    B = convert(AbstractArray{T}, M₁₂)
+    C = convert(AbstractArray{T}, M₂₁)
+    if typeof(B) != typeof(C)
+        if B isa AbstractVector && C isa AbstractVector
+            B, C = Vector{T}(B), Vector{T}(C)
+        else
+            B, C = Matrix{T}(_asmat(B)), Matrix{T}(_asmat(C))
+        end
+    end
+    D = M₂₂ isa Number ? convert(T, M₂₂) : convert(AbstractMatrix{T}, M₂₂)
+    return BorderedMatrix(A, B, C, D)
 end
 
 function BorderedMatrix(K::AbstractMatrix{T}, p::Integer) where {T}
@@ -262,7 +300,9 @@ Base.size(F::BandedLU, i::Integer) = i <= 2 ? F.n : 1
 
 LinearAlgebra.ldiv!(F::BandedLU{T}, b::StridedVecOrMat{T}) where {T} =
     LinearAlgebra.LAPACK.gbtrs!('N', F.kl, F.ku, F.n, F.AB, F.ipiv, b)
-Base.:\(F::BandedLU, b::AbstractVecOrMat) = ldiv!(F, copy_oftype(b, eltype(F)))
+Base.:\(F::BandedLU{T}, b::AbstractVecOrMat) where {T} = _realcomplex(F, b, T) do b
+    ldiv!(F, copy_oftype(b, promote_type(T, eltype(b))))
+end
 
 # solves with the transpose (and, for real matrices, the adjoint)
 _tchar(::Type{<:Real}, adj) = 'T'
@@ -272,11 +312,29 @@ for (W, adj) in ((:TransposeFactorization, false), (:AdjointFactorization, true)
         LinearAlgebra.ldiv!(Ft::LinearAlgebra.$W{T, <:BandedLU{T}}, b::StridedVecOrMat{T}) where {T} =
             (F = parent(Ft); LinearAlgebra.LAPACK.gbtrs!(_tchar(T, $adj), F.kl, F.ku, F.n, F.AB, F.ipiv, b))
         Base.:\(Ft::LinearAlgebra.$W{T, <:BandedLU{T}}, b::AbstractVecOrMat) where {T} =
-            ldiv!(Ft, copy_oftype(b, T))
+            _realcomplex(Ft, b, T) do b
+                ldiv!(Ft, copy_oftype(b, promote_type(T, eltype(b))))
+            end
+        Base.:\(Ft::LinearAlgebra.$W{T, <:BandedLU{T}}, b::VecOrMat{Complex{T}}) where {T<:Union{Float32, Float64}} =
+            _cmb(Ft \ real(b), Ft \ imag(b))
     end
 end
 
 copy_oftype(b::AbstractArray, ::Type{T}) where {T} = copyto!(similar(b, T), b)
+copy_oftype(b::BorderedVector, ::Type{T}) where {T} =
+    BorderedVector(copy_oftype(b._1, T), b._2 isa Number ? convert(T, b._2) : copy_oftype(b._2, T))
+
+# A real factorisation applied to a complex right-hand side: solve for the real and the
+# imaginary parts separately (the solve is real-linear), otherwise call `solve(b)`.
+_re(b::AbstractArray) = real(b)
+_im(b::AbstractArray) = imag(b)
+_re(b::BorderedVector) = BorderedVector(real(b._1), real(b._2))
+_im(b::BorderedVector) = BorderedVector(imag(b._1), imag(b._2))
+_cmb(x::AbstractArray, y::AbstractArray) = complex.(x, y)
+_cmb(x::BorderedVector, y::BorderedVector) =
+    BorderedVector(complex.(x._1, y._1), x._2 isa Number ? complex(x._2, y._2) : complex.(x._2, y._2))
+_realcomplex(solve, F, b, ::Type{T}) where {T} =
+    (T <: Real && eltype(b) <: Complex) ? _cmb(solve(_re(b)), solve(_im(b))) : solve(b)
 
 # ~~~ Linear algebra for bordered systems ~~~
 
@@ -367,25 +425,47 @@ function _bsolve!(F::BorderedMatrixLU{T}, f::AbstractVector, g::AbstractVector) 
     return f, g
 end
 
-function LinearAlgebra.ldiv!(F::BorderedMatrixLU, r::BorderedVector)
+_checkinplace(F::BorderedMatrixLU{T}, r) where {T} =
+    (T <: Complex && !(eltype(r) <: Complex)) &&
+        throw(ArgumentError("a complex system cannot be solved in place in a real vector; use F \\ r"))
+
+function LinearAlgebra.ldiv!(F::BorderedMatrixLU{T}, r::BorderedVector) where {T}
     nborder(F) == nborder(r) || throw(DimensionMismatch("border sizes differ"))
+    _checkinplace(F, r)
+    if T <: Real && eltype(r) <: Complex
+        z = F \ r
+        r._1 .= z._1; r._2 isa Number ? (r._2 = z._2) : (r._2 .= z._2)
+        return r
+    end
     g = _asvec(copy(r._2))
     _bsolve!(F, r._1, g)
     r._2 isa Number ? (r._2 = g[1]) : (r._2 .= g)
     return r
 end
 
-function LinearAlgebra.ldiv!(F::BorderedMatrixLU, r::AbstractVector)
+function LinearAlgebra.ldiv!(F::BorderedMatrixLU{T}, r::AbstractVector) where {T}
     n = size(F.B, 1); p = nborder(F)
     length(r) == n + p || throw(DimensionMismatch("vector has the wrong length"))
+    _checkinplace(F, r)
+    T <: Real && eltype(r) <: Complex && return copyto!(r, F \ r)
     f = view(r, 1:n); g = r[n+1:n+p]
     _bsolve!(F, f, g)
     r[n+1:n+p] .= g
     return r
 end
 
-Base.:\(F::BorderedMatrixLU, r::BorderedVector) = ldiv!(F, copy(r))
-Base.:\(F::BorderedMatrixLU, r::AbstractVector) = ldiv!(F, copy(r))
+_bdiv(F::BorderedMatrixLU{T}, r) where {T} = _realcomplex(F, r, T) do r
+    ldiv!(F, copy_oftype(r, promote_type(T, eltype(r))))
+end
+Base.:\(F::BorderedMatrixLU, r::BorderedVector) = _bdiv(F, r)
+Base.:\(F::BorderedMatrixLU, r::AbstractVector) = _bdiv(F, r)
+# resolve the ambiguity with LinearAlgebra's method for real factorisations and complex vectors
+const _BlasReal = Union{Float32, Float64}
+Base.:\(F::BorderedMatrixLU{T}, r::AbstractVector{Complex{T}}) where {T<:_BlasReal} = _bdiv(F, r)
+Base.:\(F::BorderedMatrixLU{T}, r::BorderedVector{Complex{T}}) where {T<:_BlasReal} = _bdiv(F, r)
+Base.:\(F::BorderedMatrixLU{T}, r::Vector{Complex{T}}) where {T<:_BlasReal} = _bdiv(F, r)
+Base.:\(F::BandedLU{T}, b::VecOrMat{Complex{T}}) where {T<:_BlasReal} =
+    _cmb(F \ real(b), F \ imag(b))
 
 """
     ldiv!(M::BorderedMatrix, r::BorderedVector, alg = :BEM, inplace = true)

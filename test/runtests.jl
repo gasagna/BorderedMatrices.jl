@@ -198,3 +198,54 @@ end
         @test F \ b ≈ Matrix(K) \ b
     end
 end
+
+@testset "complex and mixed element types" begin
+    Random.seed!(5)
+    n = 30
+    for p in (1, 3), alg in (:BEM, :BED), fac in (lu, bandedlu)
+        A = spdiagm(-2 => rand(ComplexF64, n-2), 0 => rand(ComplexF64, n) .+ 10, 1 => rand(ComplexF64, n-1))
+        B = p == 1 ? rand(ComplexF64, n) : rand(ComplexF64, n, p)
+        C = p == 1 ? rand(ComplexF64, n) : rand(ComplexF64, n, p)
+        D = p == 1 ? rand(ComplexF64) : rand(ComplexF64, p, p)
+        M = BorderedMatrix(A, B, C, D)
+        K = Matrix(M)
+        # the bottom block is the transpose of C, not its conjugate transpose
+        @test K[n+1:end, 1:n] == transpose(reshape(C, n, :))
+        F = lu(M; alg = alg, factorize = fac)
+        r = rand(ComplexF64, n + p)
+        @test F \ r ≈ K \ r
+        @test F \ real(r) ≈ K \ real(r)                       # real right-hand side
+        @test_throws ArgumentError ldiv!(F, real(r))           # cannot hold a complex solution
+    end
+    # real matrix, complex right-hand side
+    for fac in (lu, bandedlu)
+        A = spdiagm(-1 => rand(n-1), 0 => rand(n) .+ 4, 2 => rand(n-2))
+        M = BorderedMatrix(A, rand(n), rand(n), 1.0)
+        F = lu(M; factorize = fac)
+        r = rand(ComplexF64, n + 1)
+        @test F \ r ≈ Matrix(M) \ r
+        s = copy(r); ldiv!(F, s)
+        @test s ≈ Matrix(M) \ r
+        x = BorderedVector(r[1:n], r[n+1])
+        z = F \ x
+        @test z isa BorderedVector{ComplexF64}
+        @test z ≈ Matrix(M) \ r
+    end
+    # mixed element types are promoted
+    M = BorderedMatrix(rand(4, 4) + 4I, rand(ComplexF64, 4), rand(4), 1.0)
+    @test eltype(M) == ComplexF64
+    @test lu(M) \ ones(5) ≈ Matrix(M) \ ones(5)
+    @test eltype(BorderedVector(rand(3), 1im)) == ComplexF64
+    M = BorderedMatrix(rand(4, 4) + 4I, rand(4), rand(4), 2im)
+    @test eltype(M) == ComplexF64 && M[5, 5] == 2im
+    v = rand(3); x = BorderedVector(v, 1)
+    @test eltype(x) == Float64 && x._1 === v                  # same type: no copy
+    @test eltype(BorderedVector([1, 2], [3.0])) == Int        # border converted to the main type
+    # banded LU, real factorisation with complex right-hand sides
+    A = spdiagm(0 => rand(6) .+ 3, 1 => rand(5)); F = bandedlu(A)
+    b = rand(ComplexF64, 6); Bm = rand(ComplexF64, 6, 2)
+    @test F \ b ≈ A \ b
+    @test F \ Bm ≈ Matrix(A) \ Bm
+    @test transpose(F) \ b ≈ transpose(Matrix(A)) \ b
+    @test adjoint(F) \ b ≈ adjoint(Matrix(A)) \ b
+end
