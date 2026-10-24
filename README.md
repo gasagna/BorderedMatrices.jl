@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="BorderedMatrices.jl" width="720">
+</p>
+
 # BorderedMatrices.jl
 
 Solve bordered linear systems

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" role="img" aria-labelledby="title desc">
+  <title id="title">BorderedMatrices.jl logo</title>
+  <desc id="desc">The sparsity pattern of a bordered matrix: a banded block in blue, a thin border of one dense row and column in green and purple, the wrap-around corners of a cyclic matrix in red moved into the border, and the small corner block, beside the BorderedMatrices.jl wordmark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f2f5f8"/>
+    </linearGradient>
+    <filter id="panel-shadow" x="-12%" y="-25%" width="124%" height="150%">
+      <feDropShadow dx="0" dy="9" stdDeviation="11" flood-color="#172033" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#172033" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Main panel -->
+  <rect x="24" y="24" width="912" height="252" rx="24" fill="url(#bg)" filter="url(#panel-shadow)"/>
+
+  <!-- Left illustration: sparsity pattern of [A B; Cᵀ D] -->
+  <g transform="translate(118.2 62.2) scale(0.763)" filter="url(#soft)">
+    <path d="M185.0 -6 V236.0 M-6 185.0 H236.0" stroke="#98a2b3" stroke-width="2" stroke-dasharray="5 4"/>
+    <rect x="1.5" y="1.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="21.5" y="1.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="41.5" y="1.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="1.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="21.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="41.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="61.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="1.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="21.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="41.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="61.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="81.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="21.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="41.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="61.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="81.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="101.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="41.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="61.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="81.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="101.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="121.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="61.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="81.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="101.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="121.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="141.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="81.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="101.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="121.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="141.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="161.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="101.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="121.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="141.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="161.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="121.5" y="161.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.40"/>
+    <rect x="141.5" y="161.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="0.70"/>
+    <rect x="161.5" y="161.5" width="17.0" height="17.0" rx="3.5" fill="#4063d8" fill-opacity="1.00"/>
+    <rect x="191.5" y="1.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="1.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="211.5" y="1.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="1.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="191.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="21.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="211.5" y="21.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="21.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="211.5" y="41.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="41.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="211.5" y="61.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="61.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="211.5" y="81.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="81.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="211.5" y="101.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="101.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="211.5" y="121.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="121.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="191.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="141.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="211.5" y="141.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="141.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="191.5" y="161.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="161.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#cb3c33" fill-opacity="0.80"/>
+    <rect x="211.5" y="161.5" width="17.0" height="17.0" rx="3.5" fill="#389826" fill-opacity="0.90"/>
+    <rect x="161.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#9558b2" fill-opacity="0.90"/>
+    <rect x="191.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#242936" fill-opacity="0.85"/>
+    <rect x="211.5" y="191.5" width="17.0" height="17.0" rx="3.5" fill="#242936" fill-opacity="0.85"/>
+    <rect x="191.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#242936" fill-opacity="0.85"/>
+    <rect x="211.5" y="211.5" width="17.0" height="17.0" rx="3.5" fill="#242936" fill-opacity="0.85"/>
+    <path d="M-8 -10 H-16 V240.0 H-8 M238.0 -10 H246.0 V240.0 H238.0" fill="none" stroke="#242936" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Wordmark and subtitle -->
+  <g transform="translate(372 96)">
+    <text x="0" y="48" font-family="Inter, Avenir, Helvetica, Arial, sans-serif"
+          font-size="54" font-weight="820" fill="#222734" letter-spacing="0">BorderedMatrices.jl</text>
+    <text x="2" y="90" font-family="Inter, Avenir, Helvetica, Arial, sans-serif"
+          font-size="21" font-weight="700" fill="#4f596b" letter-spacing="0">Stable block elimination for bordered systems,</text>
+    <text x="2" y="118" font-family="Inter, Avenir, Helvetica, Arial, sans-serif"
+          font-size="21" font-weight="700" fill="#4f596b" letter-spacing="0">with sparse, dense and banded factorisations.</text>
+  </g>
+</svg>
